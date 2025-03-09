@@ -393,10 +393,11 @@ async def main():
     print(f"Setting Telegram webhook to {WEBHOOK_URL}/telegram-webhook")
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/telegram-webhook")
 
-    # Start Flask app
-    print("Starting Flask app...")
+    # Start Flask app with dynamic port
+    port = int(os.environ.get("PORT", 5000))  # Use Render's PORT env var, default to 5000 locally
+    print(f"Starting Flask app on port {port}...")
     loop = asyncio.get_event_loop()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
     asyncio.run(main())

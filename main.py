@@ -14,16 +14,16 @@ print("Python path:", sys.path)
 
 # Import game-specific handlers from subdirectories
 from basketball.basketball import basketball_command, basketball_button_handler, basketball_text_handler
-from bowling.bowling import start_bowling, handle_bowling_buttons, handle_bowling_text
-from coin.coin import start_coinflip, handle_coinflip_buttons
-from darts.darts import start_darts, handle_darts_buttons, handle_darts_text
-from dice.dice import start_dice, handle_dice_buttons, handle_dice_text
-from football.football import start_football, handle_football_buttons, handle_football_text
-from mines.mines import start_mines, handle_mines_buttons
-from predict.predict import start_predict, handle_predict_buttons
-from roulette.roulette import start_roulette, handle_roulette_buttons
-from slots.slots import start_slots, handle_slots_buttons
-from tower.tower import start_tower, handle_tower_buttons
+from bowling.bowling import bowling_command, bowling_button_handler, bowling_text_handler
+from coin.coin import coin_command, coin_button_handler
+from darts.darts import dart_command, dart_button_handler, dart_text_handler
+from dice.dice import dice_command, dice_button_handler, dice_text_handler
+from football.football import football_command, football_button_handler, football_text_handler
+from mines.mines import mine_command, mine_button_handler
+from predict.predict import predict_command, predict_button_handler
+from roulette.roulette import roulette_command, roulette_button_handler
+from slots.slots import slots_command, slots_button_handler
+from tower.tower import tower_command, tower_button_handler
 
 # Apply nest_asyncio to allow nested event loops
 nest_asyncio.apply()
@@ -358,36 +358,36 @@ async def main():
 
     # Register game command handlers
     application.add_handler(CommandHandler("basketball", basketball_command))
-    application.add_handler(CommandHandler("bowl", start_bowling))
-    application.add_handler(CommandHandler("coin", start_coinflip))
-    application.add_handler(CommandHandler("dart", start_darts))
-    application.add_handler(CommandHandler("dice", start_dice))
-    application.add_handler(CommandHandler("football", start_football))
-    application.add_handler(CommandHandler("mine", start_mines))
-    application.add_handler(CommandHandler("predict", start_predict))
-    application.add_handler(CommandHandler("roul", start_roulette))
-    application.add_handler(CommandHandler("slots", start_slots))
-    application.add_handler(CommandHandler("tower", start_tower))
+    application.add_handler(CommandHandler("bowl", bowling_command))
+    application.add_handler(CommandHandler("coin", coin_command))
+    application.add_handler(CommandHandler("dart", dart_command))
+    application.add_handler(CommandHandler("dice", dice_command))
+    application.add_handler(CommandHandler("football", football_command))
+    application.add_handler(CommandHandler("mine", mine_command))
+    application.add_handler(CommandHandler("predict", predict_command))
+    application.add_handler(CommandHandler("roul", roulette_command))
+    application.add_handler(CommandHandler("slots", slots_command))
+    application.add_handler(CommandHandler("tower", tower_command))
 
     # Register game button handlers
     application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))
-    application.add_handler(CallbackQueryHandler(handle_bowling_buttons, pattern="^bowl_"))
-    application.add_handler(CallbackQueryHandler(handle_coinflip_buttons, pattern="^coin_"))
-    application.add_handler(CallbackQueryHandler(handle_darts_buttons, pattern="^(dart_|accept_|cancel_)"))
-    application.add_handler(CallbackQueryHandler(handle_dice_buttons, pattern="^dice_"))
-    application.add_handler(CallbackQueryHandler(handle_football_buttons, pattern="^football_"))
-    application.add_handler(CallbackQueryHandler(handle_mines_buttons, pattern="^mine_"))
-    application.add_handler(CallbackQueryHandler(handle_predict_buttons, pattern="^predict_"))
-    application.add_handler(CallbackQueryHandler(handle_roulette_buttons, pattern="^roul_"))
-    application.add_handler(CallbackQueryHandler(handle_slots_buttons, pattern="^slots_"))
-    application.add_handler(CallbackQueryHandler(handle_tower_buttons, pattern="^tower_"))
+    application.add_handler(CallbackQueryHandler(bowling_button_handler, pattern="^bowl_"))
+    application.add_handler(CallbackQueryHandler(coin_button_handler, pattern="^coin_"))
+    application.add_handler(CallbackQueryHandler(dart_button_handler, pattern="^(dart_|accept_|cancel_)"))
+    application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
+    application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^football_"))
+    application.add_handler(CallbackQueryHandler(mine_button_handler, pattern="^mine_"))
+    application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
+    application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
+    application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
+    application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
 
-    # Register game text handlers for challenges
+    # Register game text handlers for challenges (only for games that have them)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, basketball_text_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_bowling_text))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_darts_text))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_dice_text))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_football_text))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bowling_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dart_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dice_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, football_text_handler))
 
     # Set Telegram webhook
     print(f"Setting Telegram webhook to {WEBHOOK_URL}/telegram-webhook")

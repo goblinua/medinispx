@@ -2,34 +2,32 @@ import asyncio
 import sqlite3
 import nest_asyncio
 import requests
-import random
+import os
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from flask import Flask, request, Response
 
+# Import game-specific handlers
+from basketball.basketball import basketball_command, basketball_button_handler, basketball_text_handler
+from bowling.bowling import bowling_command, bowling_button_handler, bowling_text_handler
+from coin.coin import coin_command, coin_button_handler
+from darts.darts import dart_command, dart_button_handler, dart_text_handler
+from dice.dice import dice_command, dice_button_handler, dice_text_handler
+from football.football import football_command, football_button_handler, football_text_handler
+from mines.mines import mine_command, mine_button_handler
+from predict.predict import predict_command, predict_button_handler
+from roulette.roul import roulette_command, roulette_button_handler
+from slots.slots import slots_command, slots_button_handler
+from tower.tower import tower_command, tower_button_handler
+
 # Apply nest_asyncio to allow nested event loops
 nest_asyncio.apply()
 
-# Bot configuration
-BOT_TOKEN = "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU"  # Replace with your bot token
-NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"  # Replace with your NOWPayments API key
+# Bot configuration using environment variables
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
+NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
 
-# Define all games with names and emojis
-games = {
-    "dice": {"name": "Dice", "emoji": "🎲"},
-    "bowl": {"name": "Bowling", "emoji": "🎳"},
-    "dart": {"name": "Darts", "emoji": "🎯"},
-    "football": {"name": "Football", "emoji": "⚽️"},
-    "basketball": {"name": "Basketball", "emoji": "🏀"},
-    "coin": {"name": "Coinflip", "emoji": "🪙"},
-    "slots": {"name": "Slot machine", "emoji": "🎰"},
-    "predict": {"name": "Dice Prediction", "emoji": "🎲"},
-    "mine": {"name": "Mines", "emoji": "💣"},
-    "tower": {"name": "Monkey Tower", "emoji": "🐒"},
-    "roul": {"name": "Roulette", "emoji": "🎰"}
-}
-
-# Database functions
+# Database functions (from database.py)
 def init_db():
     with sqlite3.connect('users.db') as conn:
         c = conn.cursor()
@@ -110,21 +108,21 @@ async def start_command(update, context):
             conn.commit()
     text = (
         "📣 How To Start?\n"
-        "1. Make sure you have a balance. You can deposit by entering the /balance command.\n"
-        "2. Go to one of our groups in @BalticGames directory\n"
-        "3. Enter the /dice command and you are ready!\n\n"
-        "📣 What games can I play?\n"
+        "1. Make sure you have a balance. Use /balance to deposit.\n"
+        "2. Go to one of our groups in @BalticGames directory.\n"
+        "3. Enter a game command (e.g., /dice) and play!\n\n"
+        "📣 Available Games:\n"
         "• 🎲 Dice - /dice\n"
         "• 🎳 Bowling - /bowl\n"
         "• 🎯 Darts - /dart\n"
         "• ⚽️ Football - /football\n"
         "• 🏀 Basketball - /basketball\n"
         "• 🪙 Coinflip - /coin\n"
-        "• 🎰 Slot machine - /slots\n"
+        "• 🎰 Slot Machine - /slots\n"
         "• 🎲 Dice Prediction - /predict\n"
         "• 💣 Mines - /mine\n"
         "• 🐒 Monkey Tower - /tower\n"
-        "• 🎰 Roulette  - /roul\n\n"
+        "• 🎰 Roulette - /roul\n\n"
         "Enjoy the games! 🍀"
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
@@ -149,66 +147,7 @@ async def balance_command(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
-# Game handler for all games
-async def game_handler(update, context, game_key):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-
-    if not user_exists(user_id):
-        await context.bot.send_message(chat_id=chat_id, text="Please register with /start.")
-        return
-
-    game_info = games[game_key]
-    game_name = game_info["name"]
-    emoji = game_info["emoji"]
-
-    if len(context.args) == 0:
-        text = (
-            f"{emoji} Play {game_name}\n\n"
-            f"To play, type the command /{game_key} with the desired bet.\n\n"
-            "Examples:\n"
-            f"/{game_key} 5.50 - to play for $5.50\n"
-            f"/{game_key} half - to play for half of your balance\n"
-            f"/{game_key} all - to play all-in"
-        )
-        await context.bot.send_message(chat_id=chat_id, text=text)
-        return
-
-    bet_input = context.args[0].lower()
-    balance = get_user_balance(user_id)
-
-    if bet_input == "all":
-        bet_amount = balance
-    elif bet_input == "half":
-        bet_amount = balance / 2
-    else:
-        try:
-            bet_amount = float(bet_input)
-        except ValueError:
-            await context.bot.send_message(chat_id=chat_id, text="Invalid bet amount. Please use a number, 'half', or 'all'.")
-            return
-
-    if bet_amount <= 0:
-        await context.bot.send_message(chat_id=chat_id, text="Bet amount must be greater than zero.")
-        return
-    if bet_amount > balance:
-        await context.bot.send_message(chat_id=chat_id, text="Insufficient balance for this bet.")
-        return
-
-    new_balance = balance - bet_amount
-    update_user_balance(user_id, new_balance)
-
-    if random.random() > 0.5:
-        winnings = bet_amount * 2
-        new_balance += winnings
-        update_user_balance(user_id, new_balance)
-        text = f"{emoji} You won ${winnings:.2f}! Your new balance is ${new_balance:.2f}."
-    else:
-        text = f"{emoji} You lost. Your new balance is ${new_balance:.2f}."
-
-    await context.bot.send_message(chat_id=chat_id, text=text)
-
-# Button handlers
+# Button handlers for deposit/withdraw
 async def check_private_chat(update, context):
     query = update.callback_query
     chat_type = query.message.chat.type
@@ -264,7 +203,7 @@ async def generate_deposit_address(update, context, crypto):
             "pay_currency": crypto,
             "order_id": f"{user_id}_{int(query.message.date.timestamp())}",
             "order_description": "Deposit to bot balance",
-            "ipn_callback_url": "https://your-render-app.onrender.com/webhook"  # Replace with Render URL in Step 4
+            "ipn_callback_url": "https://casino-bot.onrender.com/webhook"  # Update after deployment
         }
         headers = {"x-api-key": NOWPAYMENTS_API_KEY}
         response = requests.post("https://api.nowpayments.io/v1/payment", json=payload, headers=headers)
@@ -381,7 +320,6 @@ def webhook():
             new_balance = current_balance + amount  # Amount in crypto units for now
             update_user_balance(user_id, new_balance)
             remove_pending_deposit(payment_id)
-            # Send notification to user
             asyncio.run_coroutine_threadsafe(
                 app.bot.send_message(
                     chat_id=user_id,
@@ -399,15 +337,44 @@ async def main():
     # Attach bot to Flask app for webhook notifications
     app.bot = application.bot
 
-    # Add standard handlers
+    # Register standard handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    # Add game command handlers dynamically
-    for game_key in games:
-        application.add_handler(CommandHandler(game_key, lambda update, context, g=game_key: game_handler(update, context, g)))
+    # Register game command handlers
+    application.add_handler(CommandHandler("basketball", basketball_command))
+    application.add_handler(CommandHandler("bowl", bowling_command))
+    application.add_handler(CommandHandler("coin", coin_command))
+    application.add_handler(CommandHandler("dart", dart_command))
+    application.add_handler(CommandHandler("dice", dice_command))
+    application.add_handler(CommandHandler("football", football_command))
+    application.add_handler(CommandHandler("mine", mine_command))
+    application.add_handler(CommandHandler("predict", predict_command))
+    application.add_handler(CommandHandler("roul", roulette_command))
+    application.add_handler(CommandHandler("slots", slots_command))
+    application.add_handler(CommandHandler("tower", tower_command))
+
+    # Register game button handlers
+    application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))
+    application.add_handler(CallbackQueryHandler(bowling_button_handler, pattern="^bowl_"))
+    application.add_handler(CallbackQueryHandler(coin_button_handler, pattern="^coin_"))
+    application.add_handler(CallbackQueryHandler(dart_button_handler, pattern="^(dart_|accept_|cancel_)"))
+    application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
+    application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^football_"))
+    application.add_handler(CallbackQueryHandler(mine_button_handler, pattern="^mine_"))
+    application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
+    application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
+    application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
+    application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
+
+    # Register game text handlers for challenges
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, basketball_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bowling_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dart_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dice_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, football_text_handler))
 
     print("Starting bot...")
     # Run Flask in a separate thread

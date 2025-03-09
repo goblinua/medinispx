@@ -7,18 +7,18 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
 
-# Import game-specific handlers
-from basketball.basketball import basketball_command, basketball_button_handler, basketball_text_handler
-from bowling.bowling import bowling_command, bowling_button_handler, bowling_text_handler
-from coin.coin import coin_command, coin_button_handler
-from darts.darts import dart_command, dart_button_handler, dart_text_handler
-from dice.dice import dice_command, dice_button_handler, dice_text_handler
-from football.football import football_command, football_button_handler, football_text_handler
-from mines.mines import mine_command, mine_button_handler
-from predict.predict import predict_command, predict_button_handler
-from roulette.roul import roulette_command, roulette_button_handler
-from slots.slots import slots_command, slots_button_handler
-from tower.tower import tower_command, tower_button_handler
+# Import game-specific handlers (corrected to flat structure)
+from basketball import basketball_command, basketball_button_handler, basketball_text_handler
+from bowling import bowling_command, bowling_button_handler, bowling_text_handler
+from coin import coin_command, coin_button_handler
+from darts import dart_command, dart_button_handler, dart_text_handler
+from dice import dice_command, dice_button_handler, dice_text_handler
+from football import football_command, football_button_handler, football_text_handler
+from mines import mine_command, mine_button_handler
+from predict import predict_command, predict_button_handler
+from roul import roulette_command, roulette_button_handler
+from slots import slots_command, slots_button_handler
+from tower import tower_command, tower_button_handler
 
 # Apply nest_asyncio to allow nested event loops
 nest_asyncio.apply()

@@ -3,8 +3,8 @@ import sqlite3
 import nest_asyncio
 import requests
 import os
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
 
 # Import game-specific handlers
@@ -26,6 +26,7 @@ nest_asyncio.apply()
 # Bot configuration using environment variables
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
+WEBHOOK_URL = "https://casino-bot-41de.onrender.com"  # Your Render URL
 
 # Database functions (from database.py)
 def init_db():
@@ -203,7 +204,7 @@ async def generate_deposit_address(update, context, crypto):
             "pay_currency": crypto,
             "order_id": f"{user_id}_{int(query.message.date.timestamp())}",
             "order_description": "Deposit to bot balance",
-            "ipn_callback_url": "https://casino-bot.onrender.com/webhook"  # Update after deployment
+            "ipn_callback_url": f"{WEBHOOK_URL}/webhook"  # NOWPayments webhook
         }
         headers = {"x-api-key": NOWPAYMENTS_API_KEY}
         response = requests.post("https://api.nowpayments.io/v1/payment", json=payload, headers=headers)
@@ -304,13 +305,19 @@ async def text_handler(update, context):
         
         context.user_data['expecting_withdrawal_details'] = False
 
-# Flask app for webhook
+# Flask app for webhooks
 app = Flask(__name__)
 
+@app.route('/telegram-webhook', methods=['POST'])
+def telegram_webhook():
+    update = Update.de_json(request.get_json(force=True), app.bot)
+    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+    return Response(status=200)
+
 @app.route('/webhook', methods=['POST'])
-def webhook():
+def nowpayments_webhook():
     data = request.json
-    print(f"Webhook received: {data}")  # For debugging
+    print(f"NOWPayments Webhook received: {data}")  # For debugging
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
         deposit = get_pending_deposit(payment_id)
@@ -325,16 +332,17 @@ def webhook():
                     chat_id=user_id,
                     text=f"✅ Deposit of {amount} {data['pay_currency'].upper()} confirmed! New balance: ${new_balance:.2f}"
                 ),
-                asyncio.get_event_loop()
+                loop
             )
     return Response(status=200)
 
-# Main bot loop
+# Main bot setup
 async def main():
+    global application, loop
     init_db()
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Attach bot to Flask app for webhook notifications
+    # Attach bot to Flask app
     app.bot = application.bot
 
     # Register standard handlers
@@ -376,12 +384,14 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dice_text_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, football_text_handler))
 
-    print("Starting bot...")
-    # Run Flask in a separate thread
-    from threading import Thread
-    flask_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=5000))
-    flask_thread.start()
-    await application.run_polling()
+    # Set Telegram webhook
+    print(f"Setting Telegram webhook to {WEBHOOK_URL}/telegram-webhook")
+    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/telegram-webhook")
+
+    # Start Flask app
+    print("Starting Flask app...")
+    loop = asyncio.get_event_loop()
+    app.run(host='0.0.0.0', port=5000)
 
 if __name__ == "__main__":
     asyncio.run(main())

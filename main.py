@@ -4,9 +4,14 @@ import nest_asyncio
 import requests
 import os
 import sys
+import logging  # Add logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Debugging import path
 print("Current working directory:", os.getcwd())
@@ -31,9 +36,9 @@ nest_asyncio.apply()
 # Bot configuration using environment variables
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
-WEBHOOK_URL = "https://casino-bot-41de.onrender.com"  # Your Render URL
+WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 
-# Database functions (from database.py)
+# Database functions
 def init_db():
     with sqlite3.connect('users.db') as conn:
         c = conn.cursor()
@@ -87,8 +92,9 @@ def get_usdt_to_ltc_rate():
         response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=ltc")
         rate = response.json()["tether"]["ltc"]
         return rate
-    except Exception:
-        return 1.0  # Fallback rate if API fails
+    except Exception as e:
+        logger.error(f"Failed to fetch USDT to LTC rate: {e}")
+        return 1.0
 
 # Fetch minimal deposit amount from NOWPayments
 def get_min_deposit_amount(crypto):
@@ -100,11 +106,12 @@ def get_min_deposit_amount(crypto):
         data = response.json()
         return float(data["min_amount"])
     except Exception as e:
-        print(f"Failed to fetch min amount for {crypto}: {e}")
-        return 0.01  # Fallback minimal amount
+        logger.error(f"Failed to fetch min amount for {crypto}: {e}")
+        return 0.01
 
 # Command handlers
-async def start_command(update, context):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /start command from user {update.effective_user.id}")
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
     if not user_exists(user_id):
@@ -132,8 +139,10 @@ async def start_command(update, context):
         "Enjoy the games! 🍀"
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+    logger.info(f"Sent /start response to user {user_id}")
 
 async def balance_command(update, context):
+    logger.info(f"Received /balance command from user {update.effective_user.id}")
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
@@ -157,8 +166,7 @@ async def balance_command(update, context):
 async def check_private_chat(update, context):
     query = update.callback_query
     chat_type = query.message.chat.type
-    bot_username = "diceLive_bot"  # Replace with your bot's username if different
-
+    bot_username = "diceLive_bot"
     if chat_type != 'private':
         text = f"💬 These options are only available through the bot. Click here to proceed: https://t.me/{bot_username}"
         await context.bot.send_message(chat_id=query.message.chat_id, text=text)
@@ -169,11 +177,9 @@ async def check_private_chat(update, context):
 async def deposit_handler(update, context):
     if not await check_private_chat(update, context):
         return
-
     query = update.callback_query
     chat_id = query.message.chat_id
     message_id = query.message.message_id
-
     text = "💳 Deposit\n\nChoose your preferred deposit method:"
     keyboard = [
         [InlineKeyboardButton("SOLANA", callback_data="deposit_sol"),
@@ -189,7 +195,6 @@ async def generate_deposit_address(update, context, crypto):
     user_id = update.effective_user.id
     chat_id = query.message.chat_id
     message_id = query.message.message_id
-
     currency_map = {
         "sol": {"name": "Solana", "symbol": "SOL"},
         "btc": {"name": "Bitcoin", "symbol": "BTC"},
@@ -199,9 +204,7 @@ async def generate_deposit_address(update, context, crypto):
     if not currency_info:
         await context.bot.edit_message_text("Invalid selection.", chat_id=chat_id, message_id=message_id)
         return
-
     min_amount = get_min_deposit_amount(crypto)
-
     try:
         payload = {
             "price_amount": min_amount,
@@ -209,7 +212,7 @@ async def generate_deposit_address(update, context, crypto):
             "pay_currency": crypto,
             "order_id": f"{user_id}_{int(query.message.date.timestamp())}",
             "order_description": "Deposit to bot balance",
-            "ipn_callback_url": f"{WEBHOOK_URL}/webhook"  # NOWPayments webhook
+            "ipn_callback_url": f"{WEBHOOK_URL}/webhook"
         }
         headers = {"x-api-key": NOWPAYMENTS_API_KEY}
         response = requests.post("https://api.nowpayments.io/v1/payment", json=payload, headers=headers)
@@ -219,9 +222,7 @@ async def generate_deposit_address(update, context, crypto):
             raise KeyError("Required fields missing in response")
         address = payment_data["pay_address"]
         payment_id = payment_data["payment_id"]
-
         add_pending_deposit(payment_id, user_id, min_amount, crypto)
-
         text = (
             f"💳 {currency_info['name']} deposit\n\n"
             f"Send at least {min_amount} {currency_info['symbol']} to this address:\n"
@@ -230,19 +231,16 @@ async def generate_deposit_address(update, context, crypto):
         )
         await context.bot.edit_message_text(text, chat_id=chat_id, message_id=message_id)
     except Exception as e:
-        print(f"Failed to create deposit payment for {crypto}: {e}")
-        print(f"API Response: {response.text if 'response' in locals() else 'No response'}")
+        logger.error(f"Failed to create deposit payment for {crypto}: {e}")
         await context.bot.edit_message_text("Failed to generate deposit address. Try again later.", chat_id=chat_id, message_id=message_id)
     await query.answer()
 
 async def withdraw_handler(update, context):
     if not await check_private_chat(update, context):
         return
-
     query = update.callback_query
     chat_id = query.message.chat_id
     message_id = query.message.message_id
-
     text = "💸 Withdraw\n\nEnter the amount in USD and your LTC address, e.g., '5.00 LTC123...'."
     await context.bot.edit_message_text(text, chat_id=chat_id, message_id=message_id)
     context.user_data['expecting_withdrawal_details'] = True
@@ -264,18 +262,15 @@ async def text_handler(update, context):
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         text = update.message.text.strip().split()
-        
         if len(text) < 2:
             await context.bot.send_message(chat_id=chat_id, text="Please provide amount and LTC address, e.g., '5.00 LTC123...'")
             return
-        
         try:
             amount_usd = float(text[0])
             withdrawal_address = text[1]
         except ValueError:
             await context.bot.send_message(chat_id=chat_id, text="Invalid amount. Use a number, e.g., '5.00 LTC123...'")
             return
-
         balance = get_user_balance(user_id)
         if amount_usd <= 0:
             await context.bot.send_message(chat_id=chat_id, text="Amount must be greater than zero.")
@@ -285,10 +280,8 @@ async def text_handler(update, context):
             await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
             context.user_data['expecting_withdrawal_details'] = False
             return
-
         rate_usdt_to_ltc = get_usdt_to_ltc_rate()
         amount_ltc = amount_usd * rate_usdt_to_ltc
-
         try:
             url = "https://api.nowpayments.io/v1/payout"
             headers = {"x-api-key": NOWPAYMENTS_API_KEY, "Content-Type": "application/json"}
@@ -304,10 +297,8 @@ async def text_handler(update, context):
             update_user_balance(user_id, new_balance)
             await context.bot.send_message(chat_id=chat_id, text=f"💸 Withdrawn ${amount_usd:.2f} ({amount_ltc:.6f} LTC) to {withdrawal_address}. New balance: ${new_balance:.2f}")
         except Exception as e:
-            print(f"Failed to process withdrawal: {e}")
-            print(f"API Response: {response.text if 'response' in locals() else 'No response'}")
+            logger.error(f"Failed to process withdrawal: {e}")
             await context.bot.send_message(chat_id=chat_id, text="Failed to process withdrawal. Try again later.")
-        
         context.user_data['expecting_withdrawal_details'] = False
 
 # Flask app for webhooks
@@ -315,21 +306,24 @@ app = Flask(__name__)
 
 @app.route('/telegram-webhook', methods=['POST'])
 def telegram_webhook():
+    logger.info("Received Telegram webhook update")
     update = Update.de_json(request.get_json(force=True), app.bot)
+    logger.info(f"Update received: {update}")
     asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+    logger.info("Update processed")
     return Response(status=200)
 
 @app.route('/webhook', methods=['POST'])
 def nowpayments_webhook():
     data = request.json
-    print(f"NOWPayments Webhook received: {data}")  # For debugging
+    logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
         deposit = get_pending_deposit(payment_id)
         if deposit:
             user_id, amount = deposit
             current_balance = get_user_balance(user_id)
-            new_balance = current_balance + amount  # Amount in crypto units for now
+            new_balance = current_balance + amount
             update_user_balance(user_id, new_balance)
             remove_pending_deposit(payment_id)
             asyncio.run_coroutine_threadsafe(
@@ -382,7 +376,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
     application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
 
-    # Register game text handlers for challenges (only for games that have them)
+    # Register game text handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, basketball_text_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bowling_text_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dart_text_handler))
@@ -390,12 +384,12 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, football_text_handler))
 
     # Set Telegram webhook
-    print(f"Setting Telegram webhook to {WEBHOOK_URL}/telegram-webhook")
+    logger.info(f"Setting Telegram webhook to {WEBHOOK_URL}/telegram-webhook")
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/telegram-webhook")
 
-    # Start Flask app with dynamic port
-    port = int(os.environ.get("PORT", 5000))  # Use Render's PORT env var, default to 5000 locally
-    print(f"Starting Flask app on port {port}...")
+    # Start Flask app
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting Flask app on port {port}...")
     loop = asyncio.get_event_loop()
     app.run(host='0.0.0.0', port=port)
 

@@ -35,7 +35,6 @@ nest_asyncio.apply()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
 NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
-BOT_USERNAME = "@diceLive_bot"  # Replace with your bot's actual username
 
 # Database functions
 def init_db():
@@ -86,11 +85,14 @@ def remove_pending_deposit(payment_id):
         conn.commit()
 
 # Helper functions
-def create_deposit_payment(user_id, currency):
+def create_deposit_payment(user_id, currency='ltc'):
     try:
+        # Set a minimum deposit amount in USD
         min_deposit_usd = 1.0
-        price = get_currency_to_usd_price(currency)
-        min_deposit_currency = min_deposit_usd / price
+        # Fetch current currency to USD price
+        currency_price = get_currency_to_usd_price(currency)
+        # Convert USD to currency
+        min_deposit_currency = min_deposit_usd / currency_price
         
         url = "https://api.nowpayments.io/v1/payment"
         headers = {"x-api-key": NOWPAYMENTS_API_KEY}
@@ -288,18 +290,21 @@ def nowpayments_webhook():
     logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
-        pay_amount = float(data.get('pay_amount', 0))
+        pay_amount = float(data.get('pay_amount', 0))  # Actual amount in crypto
+        currency = data.get('pay_currency')  # e.g., 'ltc'
         if pay_amount > 0:
             deposit = get_pending_deposit(payment_id)
             if deposit:
-                user_id, currency = deposit
+                user_id, _ = deposit
                 try:
-                    price = get_currency_to_usd_price(currency)
-                    usd_amount = pay_amount * price
+                    # Convert crypto to USD using current exchange rate
+                    crypto_price_usd = get_currency_to_usd_price(currency)
+                    usd_amount = pay_amount * crypto_price_usd  # Actual USD value
                     current_balance = get_user_balance(user_id)
                     new_balance = current_balance + usd_amount
                     update_user_balance(user_id, new_balance)
                     remove_pending_deposit(payment_id)
+                    # Notify user
                     asyncio.run_coroutine_threadsafe(
                         app.bot.send_message(
                             chat_id=user_id,
@@ -327,6 +332,34 @@ async def main():
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    
+    # Register game command handlers
+    application.add_handler(CommandHandler("dice", dice_command))
+    application.add_handler(CommandHandler("tower", tower_command))
+    application.add_handler(CommandHandler("basketball", basketball_command))
+    application.add_handler(CommandHandler("bowl", bowling_command))
+    application.add_handler(CommandHandler("coin", coin_command))
+    application.add_handler(CommandHandler("dart", dart_command))
+    application.add_handler(CommandHandler("football", football_command))
+    application.add_handler(CommandHandler("mine", mine_command))
+    application.add_handler(CommandHandler("predict", predict_command))
+    application.add_handler(CommandHandler("roul", roulette_command))
+    application.add_handler(CommandHandler("slots", slots_command))
+
+    # Register game button handlers (if applicable)
+    application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
+    application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
+    application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))
+    application.add_handler(CallbackQueryHandler(bowling_button_handler, pattern="^bowl_"))
+    application.add_handler(CallbackQueryHandler(coin_button_handler, pattern="^coin_"))
+    application.add_handler(CallbackQueryHandler(dart_button_handler, pattern="^dart_"))
+    application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^football_"))
+    application.add_handler(CallbackQueryHandler(mine_button_handler, pattern="^mine_"))
+    application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
+    application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
+    application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
+
+    # Fallback handler
     application.add_handler(MessageHandler(filters.ALL, fallback_handler))
 
     loop = asyncio.new_event_loop()

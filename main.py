@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
 
-# Game imports (replace these with your actual game module imports)
+# Game imports (these should match your actual game modules)
 from basketball import basketball_command, basketball_button_handler, basketball_text_handler
 from bowling import bowling_command, bowling_button_handler, bowling_text_handler
 from coin import coin_command, coin_button_handler
@@ -22,19 +22,19 @@ from roulette import roulette_command, roulette_button_handler
 from slots import slots_command, slots_button_handler
 from tower import tower_command, tower_button_handler
 
-# Set up logging
+# Set up logging to help you debug if something goes wrong
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Allow nested event loops (useful for Flask + asyncio)
+# Allow nested event loops (needed for Flask + Telegram)
 nest_asyncio.apply()
 
-# Bot configuration using environment variables
+# Bot configuration (use your own BOT_TOKEN if different)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 
-# Database functions
+# Database functions to manage users and balances
 def init_db():
     with sqlite3.connect('users.db') as conn:
         c = conn.cursor()
@@ -111,49 +111,70 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 🎰 Roulette  - /roul\n\n"
         "Enjoy the games! 🍀"
     )
-    try:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
-        logger.info(f"Sent /start response to chat {update.effective_chat.id}")
-    except Exception as e:
-        logger.error(f"Failed to send /start message: {e}")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+    logger.info(f"Sent /start response to chat {update.effective_chat.id}")
 
-# Placeholder for other command handlers (replace with your actual code)
 async def balance_command(update, context):
-    # Add your balance_command code here from your original main.py
-    pass
+    logger.info("Balance command triggered")
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
 
-# Placeholder for button handler (replace with your actual code)
+    if not user_exists(user_id):
+        await context.bot.send_message(chat_id=chat_id, text="Please register with /start.")
+        return
+
+    balance = get_user_balance(user_id)
+    text = f"Your balance: ${balance:.2f}"
+    keyboard = [
+        [InlineKeyboardButton("Deposit", callback_data="deposit"),
+         InlineKeyboardButton("Withdraw", callback_data="withdraw")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+
+# Button handler for deposit and withdraw buttons
 async def button_handler(update, context):
-    # Add your button_handler code here from your original main.py
-    pass
+    query = update.callback_query
+    data = query.data
+    logger.info(f"Button pressed: {data}")
+    chat_id = query.message.chat_id
 
-# Placeholder for text handler (replace with your actual code)
+    if data == "deposit":
+        await query.answer("Deposit functionality coming soon!")
+    elif data == "withdraw":
+        await query.answer()
+        await context.bot.send_message(chat_id=chat_id, text="Please enter the amount and your LTC address, e.g., '5.00 LTC123...'")
+        context.user_data['expecting_withdrawal_details'] = True
+    else:
+        await query.answer("Unknown action.")
+
+# Text handler for withdrawal input
 async def text_handler(update, context):
-    # Add your text_handler code here from your original main.py
-    pass
+    chat_id = update.effective_chat.id
+    if context.user_data.get('expecting_withdrawal_details'):
+        try:
+            amount, address = update.message.text.split()
+            amount = float(amount)
+            # Placeholder for actual withdrawal (you can add real logic later)
+            await context.bot.send_message(chat_id=chat_id, text=f"Withdrawing ${amount:.2f} to {address}")
+            context.user_data['expecting_withdrawal_details'] = False
+        except ValueError:
+            await context.bot.send_message(chat_id=chat_id, text="Invalid input. Please enter amount and address, e.g., '5.00 LTC123...'")
+    else:
+        await context.bot.send_message(chat_id=chat_id, text="I don’t understand that command.")
 
-# Fallback handler
-async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Unhandled update: {update}")
-
-# Flask app setup
+# Flask app setup for webhooks
 app = Flask(__name__)
 
-# Telegram webhook route
 @app.route('/telegram-webhook', methods=['POST'])
 def telegram_webhook():
-    logger.info("Received Telegram webhook update")
     update = Update.de_json(request.get_json(force=True), app.bot)
-    logger.info(f"Update received: {update}")
     asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
-    logger.info("Update scheduled for processing")
     return Response(status=200)
 
-# NOWPayments webhook route
 @app.route('/webhook', methods=['POST'])
 def nowpayments_webhook():
     data = request.json
-    logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
         deposit = get_pending_deposit(payment_id)
@@ -172,7 +193,7 @@ def nowpayments_webhook():
             )
     return Response(status=200)
 
-# Function to run the event loop in a separate thread
+# Run the event loop in a separate thread
 def run_loop(loop):
     asyncio.set_event_loop(loop)
     loop.run_forever()
@@ -182,11 +203,7 @@ async def main():
     global application, loop
     init_db()
     application = Application.builder().token(BOT_TOKEN).build()
-
-    # Initialize the application
     await application.initialize()
-
-    # Attach bot to Flask app
     app.bot = application.bot
 
     # Register handlers
@@ -194,8 +211,8 @@ async def main():
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    
-    # Game command handlers
+
+    # Game commands
     application.add_handler(CommandHandler("basketball", basketball_command))
     application.add_handler(CommandHandler("bowl", bowling_command))
     application.add_handler(CommandHandler("coin", coin_command))
@@ -221,27 +238,15 @@ async def main():
     application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
     application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
 
-    # Game text handlers (Note: You might need to adjust this if multiple games use text input)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, basketball_text_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bowling_text_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dart_text_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dice_text_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, football_text_handler))
-
-    # Fallback handler
-    application.add_handler(MessageHandler(filters.ALL, fallback_handler))
-
-    # Create a new event loop and run it in a separate thread
+    # Start the event loop
     loop = asyncio.new_event_loop()
     threading.Thread(target=run_loop, args=(loop,), daemon=True).start()
 
     # Set Telegram webhook
-    logger.info(f"Setting Telegram webhook to {WEBHOOK_URL}/telegram-webhook")
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/telegram-webhook")
 
     # Start Flask app
     port = int(os.environ.get("PORT", 5000))
-    logger.info(f"Starting Flask app on port {port}...")
     app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":

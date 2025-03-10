@@ -3,9 +3,8 @@ import sqlite3
 import nest_asyncio
 import requests
 import os
-import sys
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
 
@@ -155,11 +154,37 @@ def get_min_deposit_amount(crypto):
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Received /start command from user {update.effective_user.id} in chat {update.effective_chat.id}")
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
+    if not user_exists(user_id):
+        with sqlite3.connect('users.db') as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO users (user_id, username, balance) VALUES (?, ?, 0.0)", (user_id, username))
+            conn.commit()
+    text = (
+        "📣 How To Start?\n"
+        "1. Make sure you have a balance. You can deposit by entering the /balance command.\n"
+        "2. Go to one of our groups in @BalticGames directory\n"
+        "3. Enter the /dice command and you are ready!\n\n"
+        "📣 What games can I play?\n"
+        "• 🎲 Dice - /dice\n"
+        "• 🎳 Bowling - /bowl\n"
+        "• 🎯 Darts - /dart\n"
+        "• ⚽️ Football - /football\n"
+        "• 🏀 Basketball - /basketball\n"
+        "• 🪙 Coinflip - /coin\n"
+        "• 🎰 Slot machine - /slots\n"
+        "• 🎲 Dice Prediction - /predict\n"
+        "• 💣 Mines - /mine\n"
+        "• 🐒 Monkey Tower - /tower\n"
+        "• 🎰 Roulette  - /roul\n\n"
+        "Enjoy the games! 🍀"
+    )
     try:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Bot started! Welcome to the casino bot.")
-        logger.info(f"Sent response to chat {update.effective_chat.id}")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+        logger.info(f"Sent /start response to chat {update.effective_chat.id}")
     except Exception as e:
-        logger.error(f"Failed to send message: {e}")
+        logger.error(f"Failed to send /start message: {e}")
 
 async def balance_command(update, context):
     logger.info(f"Received /balance command from user {update.effective_user.id}")
@@ -181,6 +206,10 @@ async def balance_command(update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+
+# Fallback handler for unhandled updates
+async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Unhandled update: {update}")
 
 # Button handlers for deposit/withdraw
 async def check_private_chat(update, context):
@@ -329,7 +358,7 @@ def telegram_webhook():
     logger.info("Received Telegram webhook update")
     update = Update.de_json(request.get_json(force=True), app.bot)
     logger.info(f"Update received: {update}")
-    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+    application.process_update(update)
     logger.info("Update processed")
     return Response(status=200)
 
@@ -369,42 +398,77 @@ async def main():
 
     # Register standard handlers
     application.add_handler(CommandHandler("start", start_command))
+    logger.info("Registered /start command handler")
     application.add_handler(CommandHandler("balance", balance_command))
+    logger.info("Registered /balance command handler")
     application.add_handler(CallbackQueryHandler(button_handler))
+    logger.info("Registered callback query handler")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    logger.info("Registered text message handler")
 
     # Register game command handlers
     application.add_handler(CommandHandler("basketball", basketball_command))
+    logger.info("Registered /basketball command handler")
     application.add_handler(CommandHandler("bowl", bowling_command))
+    logger.info("Registered /bowl command handler")
     application.add_handler(CommandHandler("coin", coin_command))
+    logger.info("Registered /coin command handler")
     application.add_handler(CommandHandler("dart", dart_command))
+    logger.info("Registered /dart command handler")
     application.add_handler(CommandHandler("dice", dice_command))
+    logger.info("Registered /dice command handler")
     application.add_handler(CommandHandler("football", football_command))
+    logger.info("Registered /football command handler")
     application.add_handler(CommandHandler("mine", mine_command))
+    logger.info("Registered /mine command handler")
     application.add_handler(CommandHandler("predict", predict_command))
+    logger.info("Registered /predict command handler")
     application.add_handler(CommandHandler("roul", roulette_command))
+    logger.info("Registered /roul command handler")
     application.add_handler(CommandHandler("slots", slots_command))
+    logger.info("Registered /slots command handler")
     application.add_handler(CommandHandler("tower", tower_command))
+    logger.info("Registered /tower command handler")
 
     # Register game button handlers
     application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))
+    logger.info("Registered basketball button handler")
     application.add_handler(CallbackQueryHandler(bowling_button_handler, pattern="^bowl_"))
+    logger.info("Registered bowling button handler")
     application.add_handler(CallbackQueryHandler(coin_button_handler, pattern="^coin_"))
+    logger.info("Registered coin button handler")
     application.add_handler(CallbackQueryHandler(dart_button_handler, pattern="^(dart_|accept_|cancel_)"))
+    logger.info("Registered dart button handler")
     application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
+    logger.info("Registered dice button handler")
     application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^football_"))
+    logger.info("Registered football button handler")
     application.add_handler(CallbackQueryHandler(mine_button_handler, pattern="^mine_"))
+    logger.info("Registered mine button handler")
     application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
+    logger.info("Registered predict button handler")
     application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
+    logger.info("Registered roulette button handler")
     application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
+    logger.info("Registered slots button handler")
     application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
+    logger.info("Registered tower button handler")
 
     # Register game text handlers for challenges (only for games that have them)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, basketball_text_handler))
+    logger.info("Registered basketball text handler")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bowling_text_handler))
+    logger.info("Registered bowling text handler")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dart_text_handler))
+    logger.info("Registered dart text handler")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dice_text_handler))
+    logger.info("Registered dice text handler")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, football_text_handler))
+    logger.info("Registered football text handler")
+
+    # Add fallback handler for unhandled updates (must be last)
+    application.add_handler(MessageHandler(filters.ALL, fallback_handler))
+    logger.info("Registered fallback handler")
 
     # Set Telegram webhook
     logger.info(f"Setting Telegram webhook to {WEBHOOK_URL}/telegram-webhook")

@@ -35,6 +35,7 @@ nest_asyncio.apply()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
 NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
+BOT_USERNAME = "diceLive_bot"  # Replace with your bot's actual username
 
 # Database functions
 def init_db():
@@ -84,14 +85,18 @@ def remove_pending_deposit(payment_id):
         c.execute("DELETE FROM pending_deposits WHERE payment_id = ?", (payment_id,))
         conn.commit()
 
+def get_user_by_username(username):
+    with sqlite3.connect('users.db') as conn:
+        c = conn.cursor()
+        c.execute("SELECT user_id FROM users WHERE username = ?", (username,))
+        result = c.fetchone()
+        return result[0] if result else None
+
 # Helper functions
 def create_deposit_payment(user_id, currency='ltc'):
     try:
-        # Set a minimum deposit amount in USD
         min_deposit_usd = 1.0
-        # Fetch current currency to USD price
         currency_price = get_currency_to_usd_price(currency)
-        # Convert USD to currency
         min_deposit_currency = min_deposit_usd / currency_price
         
         url = "https://api.nowpayments.io/v1/payment"
@@ -151,6 +156,107 @@ def format_expiration_time(expiration_date_str):
     except:
         return "1:00:00"
 
+# New functions for feature implementation
+async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE, game_name: str):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    args = context.args
+
+    if not user_exists(user_id):
+        await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
+        return None
+
+    if not args:
+        text = (
+            f"💣 Play {game_name.capitalize()}\n\n"
+            f"To play, type the command /{game_name} with the desired bet.\n\n"
+            f"Examples:\n"
+            f"/{game_name} 5.50 - to play for $5.50\n"
+            f"/{game_name} half - to play for half of your balance\n"
+            f"/{game_name} all - to play all-in"
+        )
+        await context.bot.send_message(chat_id=chat_id, text=text)
+        return None
+
+    bet = args[0].lower()
+    balance = get_user_balance(user_id)
+
+    if bet == "all":
+        bet_amount = balance
+    elif bet == "half":
+        bet_amount = balance / 2
+    else:
+        try:
+            bet_amount = float(bet)
+        except ValueError:
+            await context.bot.send_message(chat_id=chat_id, text="Invalid bet amount. Please use a number, 'half', or 'all'.")
+            return None
+
+    if bet_amount <= 0:
+        await context.bot.send_message(chat_id=chat_id, text="Bet amount must be greater than 0.")
+        return None
+
+    if bet_amount > balance:
+        await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
+        return None
+
+    return bet_amount
+
+def create_game_wrapper(game_name, game_func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        bet_amount = await process_bet(update, context, game_name)
+        if bet_amount is not None:
+            context.user_data['bet_amount'] = bet_amount
+            await game_func(update, context)
+    return wrapper
+
+async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    args = context.args
+
+    if not user_exists(user_id):
+        await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
+        return
+
+    if len(args) < 2:
+        await context.bot.send_message(chat_id=chat_id, text="Usage: /tip <amount> @username")
+        return
+
+    try:
+        amount = float(args[0])
+    except ValueError:
+        await context.bot.send_message(chat_id=chat_id, text="Invalid amount. Please use a number.")
+        return
+
+    if amount <= 0:
+        await context.bot.send_message(chat_id=chat_id, text="Tip amount must be greater than 0.")
+        return
+
+    username = args[1].lstrip('@')
+    recipient_id = get_user_by_username(username)
+
+    if not recipient_id:
+        await context.bot.send_message(chat_id=chat_id, text=f"User @{username} not found.")
+        return
+
+    if user_id == recipient_id:
+        await context.bot.send_message(chat_id=chat_id, text="You cannot tip yourself.")
+        return
+
+    balance = get_user_balance(user_id)
+    if amount > balance:
+        await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
+        return
+
+    recipient_balance = get_user_balance(recipient_id)
+    update_user_balance(user_id, balance - amount)
+    update_user_balance(recipient_id, recipient_balance + amount)
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"Successfully tipped ${amount:.2f} to @{username}."
+    )
+
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -181,7 +287,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
 
-async def balance_command(update, context):
+async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
@@ -200,7 +306,7 @@ async def balance_command(update, context):
 
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
-async def button_handler(update, context):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     chat_id = query.message.chat_id
@@ -256,7 +362,7 @@ async def button_handler(update, context):
     else:
         await query.answer("Unknown action.")
 
-async def text_handler(update, context):
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     if context.user_data.get('expecting_withdrawal_details'):
@@ -264,7 +370,6 @@ async def text_handler(update, context):
             parts = update.message.text.strip().split()
             amount_usd = float(parts[0])
             address = " ".join(parts[1:])
-            # Placeholder for actual withdrawal logic
             await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal of ${amount_usd:.2f} to {address} is coming soon!")
             context.user_data['expecting_withdrawal_details'] = False
         except ValueError:
@@ -290,21 +395,19 @@ def nowpayments_webhook():
     logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
-        pay_amount = float(data.get('pay_amount', 0))  # Actual amount in crypto
-        currency = data.get('pay_currency')  # e.g., 'ltc'
+        pay_amount = float(data.get('pay_amount', 0))
+        currency = data.get('pay_currency')
         if pay_amount > 0:
             deposit = get_pending_deposit(payment_id)
             if deposit:
                 user_id, _ = deposit
                 try:
-                    # Convert crypto to USD using current exchange rate
                     crypto_price_usd = get_currency_to_usd_price(currency)
-                    usd_amount = pay_amount * crypto_price_usd  # Actual USD value
+                    usd_amount = pay_amount * crypto_price_usd
                     current_balance = get_user_balance(user_id)
                     new_balance = current_balance + usd_amount
                     update_user_balance(user_id, new_balance)
                     remove_pending_deposit(payment_id)
-                    # Notify user
                     asyncio.run_coroutine_threadsafe(
                         app.bot.send_message(
                             chat_id=user_id,
@@ -333,20 +436,23 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
-    # Register game command handlers
-    application.add_handler(CommandHandler("dice", dice_command))
-    application.add_handler(CommandHandler("tower", tower_command))
-    application.add_handler(CommandHandler("basketball", basketball_command))
-    application.add_handler(CommandHandler("bowl", bowling_command))
-    application.add_handler(CommandHandler("coin", coin_command))
-    application.add_handler(CommandHandler("dart", dart_command))
-    application.add_handler(CommandHandler("football", football_command))
-    application.add_handler(CommandHandler("mine", mine_command))
-    application.add_handler(CommandHandler("predict", predict_command))
-    application.add_handler(CommandHandler("roul", roulette_command))
-    application.add_handler(CommandHandler("slots", slots_command))
+    # Register game command handlers with bet logic
+    application.add_handler(CommandHandler("dice", create_game_wrapper("dice", dice_command)))
+    application.add_handler(CommandHandler("tower", create_game_wrapper("tower", tower_command)))
+    application.add_handler(CommandHandler("basketball", create_game_wrapper("basketball", basketball_command)))
+    application.add_handler(CommandHandler("bowl", create_game_wrapper("bowl", bowling_command)))
+    application.add_handler(CommandHandler("coin", create_game_wrapper("coin", coin_command)))
+    application.add_handler(CommandHandler("dart", create_game_wrapper("dart", dart_command)))
+    application.add_handler(CommandHandler("football", create_game_wrapper("football", football_command)))
+    application.add_handler(CommandHandler("mine", create_game_wrapper("mine", mine_command)))
+    application.add_handler(CommandHandler("predict", create_game_wrapper("predict", predict_command)))
+    application.add_handler(CommandHandler("roul", create_game_wrapper("roul", roulette_command)))
+    application.add_handler(CommandHandler("slots", create_game_wrapper("slots", slots_command)))
 
-    # Register game button handlers (if applicable)
+    # Register tip command
+    application.add_handler(CommandHandler("tip", tip_command))
+
+    # Register game button handlers
     application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
     application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
     application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))

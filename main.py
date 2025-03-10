@@ -35,7 +35,7 @@ nest_asyncio.apply()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
 NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
-BOT_USERNAME = "diceLive_bot"  # Replace with your bot's actual username
+BOT_USERNAME = "YourBotUsername"  # Replace with your bot's actual username
 
 # Database functions
 def init_db():
@@ -196,7 +196,9 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE, game_n
         await context.bot.send_message(chat_id=chat_id, text="Bet amount must be greater than 0.")
         return None
 
-    if bet_amount > balance:
+    # Adjusted comparison to handle floating-point precision
+    if round(bet_amount, 2) > round(balance, 2):
+        logger.info(f"Insufficient balance: bet={bet_amount}, balance={balance}")
         await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
         return None
 
@@ -296,7 +298,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     balance = get_user_balance(user_id)
-    text = f"Your balance: ${balance:.2f}"
+    text = f"Your balance: ${round(balance, 2):.2f}"
 
     keyboard = [
         [InlineKeyboardButton("Deposit", callback_data="deposit"),
@@ -395,7 +397,7 @@ def nowpayments_webhook():
     logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
-        pay_amount = float(data.get('pay_amount', 0))
+        pay_amount = float(data.get('pay_amount', 0))  # Actual amount in crypto
         currency = data.get('pay_currency')
         if pay_amount > 0:
             deposit = get_pending_deposit(payment_id)
@@ -403,9 +405,10 @@ def nowpayments_webhook():
                 user_id, _ = deposit
                 try:
                     crypto_price_usd = get_currency_to_usd_price(currency)
-                    usd_amount = pay_amount * crypto_price_usd
+                    logger.info(f"Currency: {currency}, pay_amount: {pay_amount}, price: {crypto_price_usd}")
+                    usd_amount = round(pay_amount * crypto_price_usd, 2)
                     current_balance = get_user_balance(user_id)
-                    new_balance = current_balance + usd_amount
+                    new_balance = round(current_balance + usd_amount, 2)
                     update_user_balance(user_id, new_balance)
                     remove_pending_deposit(payment_id)
                     asyncio.run_coroutine_threadsafe(

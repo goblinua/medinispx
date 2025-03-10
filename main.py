@@ -21,6 +21,19 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6ref
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 
+# Import game-specific handlers (assuming they are in the same directory as main.py)
+from basketball import basketball_command, basketball_button_handler, basketball_text_handler
+from bowling import bowling_command, bowling_button_handler, bowling_text_handler
+from coin import coin_command, coin_button_handler
+from darts import dart_command, dart_button_handler, dart_text_handler
+from dice import dice_command, dice_button_handler, dice_text_handler
+from football import football_command, football_button_handler, football_text_handler
+from mines import mine_command, mine_button_handler
+from predict import predict_command, predict_button_handler
+from roulette import roulette_command, roulette_button_handler
+from slots import slots_command, slots_button_handler
+from tower import tower_command, tower_button_handler
+
 # Database functions
 def init_db():
     with sqlite3.connect('users.db') as conn:
@@ -324,7 +337,7 @@ async def main():
     init_db()
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Initialize the application (this is the key fix)
+    # Initialize the application
     await application.initialize()
 
     # Attach bot to Flask app

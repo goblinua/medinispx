@@ -21,18 +21,65 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6ref
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 
-# Import game-specific handlers (assuming they are in the same directory as main.py)
-from basketball import basketball_command, basketball_button_handler, basketball_text_handler
-from bowling import bowling_command, bowling_button_handler, bowling_text_handler
-from coin import coin_command, coin_button_handler
-from darts import dart_command, dart_button_handler, dart_text_handler
-from dice import dice_command, dice_button_handler, dice_text_handler
-from football import football_command, football_button_handler, football_text_handler
-from mines import mine_command, mine_button_handler
-from predict import predict_command, predict_button_handler
-from roulette import roulette_command, roulette_button_handler
-from slots import slots_command, slots_button_handler
-from tower import tower_command, tower_button_handler
+# Log the current directory contents for debugging
+logger.info(f"Current directory contents: {os.listdir('.')}")
+
+# Import game-specific handlers from the root directory
+try:
+    from basketball import basketball_command, basketball_button_handler, basketball_text_handler
+    logger.info("Successfully imported basketball functions")
+except ImportError as e:
+    logger.error(f"Failed to import basketball functions: {e}")
+try:
+    from bowling import bowling_command, bowling_button_handler, bowling_text_handler
+    logger.info("Successfully imported bowling functions")
+except ImportError as e:
+    logger.error(f"Failed to import bowling functions: {e}")
+try:
+    from coin import coin_command, coin_button_handler
+    logger.info("Successfully imported coin functions")
+except ImportError as e:
+    logger.error(f"Failed to import coin functions: {e}")
+try:
+    from darts import dart_command, dart_button_handler, dart_text_handler
+    logger.info("Successfully imported darts functions")
+except ImportError as e:
+    logger.error(f"Failed to import darts functions: {e}")
+try:
+    from dice import dice_command, dice_button_handler, dice_text_handler
+    logger.info("Successfully imported dice functions")
+except ImportError as e:
+    logger.error(f"Failed to import dice functions: {e}")
+try:
+    from football import football_command, football_button_handler, football_text_handler
+    logger.info("Successfully imported football functions")
+except ImportError as e:
+    logger.error(f"Failed to import football functions: {e}")
+try:
+    from mines import mine_command, mine_button_handler
+    logger.info("Successfully imported mines functions")
+except ImportError as e:
+    logger.error(f"Failed to import mines functions: {e}")
+try:
+    from predict import predict_command, predict_button_handler
+    logger.info("Successfully imported predict functions")
+except ImportError as e:
+    logger.error(f"Failed to import predict functions: {e}")
+try:
+    from roulette import roulette_command, roulette_button_handler
+    logger.info("Successfully imported roulette functions")
+except ImportError as e:
+    logger.error(f"Failed to import roulette functions: {e}")
+try:
+    from slots import slots_command, slots_button_handler
+    logger.info("Successfully imported slots functions")
+except ImportError as e:
+    logger.error(f"Failed to import slots functions: {e}")
+try:
+    from tower import tower_command, tower_button_handler
+    logger.info("Successfully imported tower functions")
+except ImportError as e:
+    logger.error(f"Failed to import tower functions: {e}")
 
 # Database functions
 def init_db():
@@ -337,7 +384,7 @@ async def main():
     init_db()
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Initialize the application
+    # Initialize the application (key fix)
     await application.initialize()
 
     # Attach bot to Flask app

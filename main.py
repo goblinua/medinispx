@@ -4,7 +4,7 @@ import nest_asyncio
 import requests
 import os
 import sys
-import logging  # Add logging
+import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
@@ -12,23 +12,6 @@ from flask import Flask, request, Response
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Debugging import path
-print("Current working directory:", os.getcwd())
-print("Python path:", sys.path)
-
-# Import game-specific handlers from subdirectories
-from basketball.basketball import basketball_command, basketball_button_handler, basketball_text_handler
-from bowling.bowling import bowling_command, bowling_button_handler, bowling_text_handler
-from coin.coin import coin_command, coin_button_handler
-from darts.darts import dart_command, dart_button_handler, dart_text_handler
-from dice.dice import dice_command, dice_button_handler, dice_text_handler
-from football.football import football_command, football_button_handler, football_text_handler
-from mines.mines import mine_command, mine_button_handler
-from predict.predict import predict_command, predict_button_handler
-from roulette.roulette import roulette_command, roulette_button_handler
-from slots.slots import slots_command, slots_button_handler
-from tower.tower import tower_command, tower_button_handler
 
 # Apply nest_asyncio to allow nested event loops
 nest_asyncio.apply()
@@ -341,6 +324,9 @@ async def main():
     init_db()
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # Initialize the application (this is the key fix)
+    await application.initialize()
+
     # Attach bot to Flask app
     app.bot = application.bot
 
@@ -376,7 +362,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
     application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
 
-    # Register game text handlers
+    # Register game text handlers for challenges (only for games that have them)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, basketball_text_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bowling_text_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dart_text_handler))

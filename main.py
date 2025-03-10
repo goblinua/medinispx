@@ -11,18 +11,18 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
 
-# Game imports (replace with your actual game modules)
-from basketball import basketball_command, basketball_button_handler, basketball_text_handler
-from bowling import bowling_command, bowling_button_handler, bowling_text_handler
+# Game imports (ensure these match your actual game modules)
+from dice import dice_command, dice_button_handler
+from tower import tower_command, tower_button_handler
+from basketball import basketball_command, basketball_button_handler
+from bowling import bowling_command, bowling_button_handler
 from coin import coin_command, coin_button_handler
-from darts import dart_command, dart_button_handler, dart_text_handler
-from dice import dice_command, dice_button_handler, dice_text_handler
-from football import football_command, football_button_handler, football_text_handler
+from darts import dart_command, dart_button_handler
+from football import football_command, football_button_handler
 from mines import mine_command, mine_button_handler
 from predict import predict_command, predict_button_handler
 from roulette import roulette_command, roulette_button_handler
 from slots import slots_command, slots_button_handler
-from tower import tower_command, tower_button_handler
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -87,10 +87,17 @@ def remove_pending_deposit(payment_id):
 # Helper functions
 def create_deposit_payment(user_id, currency='ltc'):
     try:
+        # Set a minimum deposit amount in USD
+        min_deposit_usd = 1.0
+        # Fetch current LTC to USD price
+        ltc_price = get_ltc_to_usd_price()
+        # Convert USD to LTC
+        min_deposit_ltc = min_deposit_usd / ltc_price
+        
         url = "https://api.nowpayments.io/v1/payment"
         headers = {"x-api-key": NOWPAYMENTS_API_KEY}
         payload = {
-            "price_amount": 0,  # Allow any amount
+            "price_amount": min_deposit_ltc,
             "price_currency": currency,
             "pay_currency": currency,
             "ipn_callback_url": f"{WEBHOOK_URL}/webhook",
@@ -113,35 +120,6 @@ def create_deposit_payment(user_id, currency='ltc'):
     except Exception as e:
         logger.error(f"Deposit creation failed: {e}")
         raise
-
-def create_payout(user_id, amount_usd, address):
-    try:
-        ltc_price = get_ltc_to_usd_price()
-        amount_ltc = amount_usd / ltc_price
-        url = "https://api.nowpayments.io/v1/payout"
-        headers = {"x-api-key": NOWPAYMENTS_API_KEY}
-        payload = {
-            "price_amount": amount_ltc,
-            "price_currency": "ltc",
-            "pay_currency": "ltc",
-            "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook",
-            "order_id": f"withdrawal_{user_id}_{int(time.time())}",
-            "address": address
-        }
-        logger.info(f"Sending payout request: {payload}")
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        logger.info(f"Received payout response: {data}")
-        return data
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Payout API request failed: {e}")
-        if e.response is not None:
-            logger.error(f"Response content: {e.response.text}")
-        return None
-    except Exception as e:
-        logger.error(f"Payout creation failed: {e}")
-        return None
 
 def get_ltc_to_usd_price():
     try:
@@ -225,6 +203,9 @@ async def button_handler(update, context):
             await context.bot.send_message(chat_id=chat_id, text="Please start a private conversation with me to proceed with the deposit.")
         else:
             try:
+                min_deposit_usd = 1.0
+                ltc_price = get_ltc_to_usd_price()
+                min_deposit_ltc = min_deposit_usd / ltc_price
                 payment_data = create_deposit_payment(user_id, 'ltc')
                 address = payment_data['pay_address']
                 payment_id = payment_data['payment_id']
@@ -233,7 +214,7 @@ async def button_handler(update, context):
                 add_pending_deposit(payment_id, user_id, 'ltc')
                 text = (
                     "💳 Litecoin deposit\n\n"
-                    "To top up your balance, transfer the desired amount to this LTC address.\n\n"
+                    f"To top up your balance, transfer at least {min_deposit_ltc:.6f} LTC (equivalent to ${min_deposit_usd:.2f}) to this LTC address.\n\n"
                     "Please note:\n"
                     "1. The deposit address is temporary and is only issued for 1 hour. A new one will be created after that.\n"
                     "2. One address accepts only one payment.\n\n"
@@ -251,47 +232,12 @@ async def button_handler(update, context):
                     await context.bot.send_message(chat_id=chat_id, text=f"Failed to generate deposit address: {error_msg}. Try again or contact support.")
         await query.answer()
     elif data == "withdraw":
-        if update.effective_chat.type != 'private':
-            await context.bot.send_message(chat_id=chat_id, text="Please start a private conversation with me to proceed with the withdrawal.")
-        else:
-            context.user_data['expecting_withdrawal_details'] = True
-            await context.bot.send_message(chat_id=chat_id, text="Please enter the amount in USD and your LTC address, e.g., '5.00 LTC123...'")
-        await query.answer()
+        await query.answer("Withdraw functionality coming soon!")
     else:
         await query.answer("Unknown action.")
 
 async def text_handler(update, context):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    if context.user_data.get('expecting_withdrawal_details'):
-        try:
-            parts = update.message.text.strip().split()
-            amount_usd = float(parts[0])
-            address = " ".join(parts[1:])
-            if not address.startswith("L"):
-                raise ValueError("Invalid LTC address")
-            balance = get_user_balance(user_id)
-            if amount_usd <= 0:
-                raise ValueError("Amount must be positive")
-            if amount_usd > balance:
-                await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
-                return
-            payout_data = create_payout(user_id, amount_usd, address)
-            if payout_data:
-                new_balance = balance - amount_usd
-                update_user_balance(user_id, new_balance)
-                await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal of ${amount_usd:.2f} to `{address}` initiated. New balance: ${new_balance:.2f}", parse_mode='Markdown')
-            else:
-                await context.bot.send_message(chat_id=chat_id, text="Withdrawal failed. Check your address or try again.")
-        except ValueError as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"Invalid input: {str(e)}. Please enter 'amount address', e.g., '5.00 LTC123...'")
-        except Exception as e:
-            logger.error(f"Withdrawal error: {e}")
-            await context.bot.send_message(chat_id=chat_id, text="An error occurred. Please try again.")
-        finally:
-            context.user_data['expecting_withdrawal_details'] = False
-    else:
-        await context.bot.send_message(chat_id=chat_id, text="I don’t understand that command.")
+    pass
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Unhandled update: {update}")
@@ -351,6 +297,34 @@ async def main():
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    
+    # Register game command handlers
+    application.add_handler(CommandHandler("dice", dice_command))
+    application.add_handler(CommandHandler("tower", tower_command))
+    application.add_handler(CommandHandler("basketball", basketball_command))
+    application.add_handler(CommandHandler("bowl", bowling_command))
+    application.add_handler(CommandHandler("coin", coin_command))
+    application.add_handler(CommandHandler("dart", dart_command))
+    application.add_handler(CommandHandler("football", football_command))
+    application.add_handler(CommandHandler("mine", mine_command))
+    application.add_handler(CommandHandler("predict", predict_command))
+    application.add_handler(CommandHandler("roul", roulette_command))
+    application.add_handler(CommandHandler("slots", slots_command))
+
+    # Register game button handlers (if applicable)
+    application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
+    application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
+    application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))
+    application.add_handler(CallbackQueryHandler(bowling_button_handler, pattern="^bowl_"))
+    application.add_handler(CallbackQueryHandler(coin_button_handler, pattern="^coin_"))
+    application.add_handler(CallbackQueryHandler(dart_button_handler, pattern="^dart_"))
+    application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^football_"))
+    application.add_handler(CallbackQueryHandler(mine_button_handler, pattern="^mine_"))
+    application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
+    application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
+    application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
+
+    # Fallback handler
     application.add_handler(MessageHandler(filters.ALL, fallback_handler))
 
     loop = asyncio.new_event_loop()

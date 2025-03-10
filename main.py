@@ -154,35 +154,12 @@ def get_min_deposit_amount(crypto):
 
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received /start command from user {update.effective_user.id}")
-    user_id = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
-    if not user_exists(user_id):
-        with sqlite3.connect('users.db') as conn:
-            c = conn.cursor()
-            c.execute("INSERT INTO users (user_id, username, balance) VALUES (?, ?, 0.0)", (user_id, username))
-            conn.commit()
-    text = (
-        "📣 How To Start?\n"
-        "1. Make sure you have a balance. Use /balance to deposit.\n"
-        "2. Go to one of our groups in @BalticGames directory.\n"
-        "3. Enter a game command (e.g., /dice) and play!\n\n"
-        "📣 Available Games:\n"
-        "• 🎲 Dice - /dice\n"
-        "• 🎳 Bowling - /bowl\n"
-        "• 🎯 Darts - /dart\n"
-        "• ⚽️ Football - /football\n"
-        "• 🏀 Basketball - /basketball\n"
-        "• 🪙 Coinflip - /coin\n"
-        "• 🎰 Slot Machine - /slots\n"
-        "• 🎲 Dice Prediction - /predict\n"
-        "• 💣 Mines - /mine\n"
-        "• 🐒 Monkey Tower - /tower\n"
-        "• 🎰 Roulette - /roul\n\n"
-        "Enjoy the games! 🍀"
-    )
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
-    logger.info(f"Sent /start response to user {user_id}")
+    logger.info(f"Received /start command from user {update.effective_user.id} in chat {update.effective_chat.id}")
+    try:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Bot started! Welcome to the casino bot.")
+        logger.info(f"Sent response to chat {update.effective_chat.id}")
+    except Exception as e:
+        logger.error(f"Failed to send message: {e}")
 
 async def balance_command(update, context):
     logger.info(f"Received /balance command from user {update.effective_user.id}")
@@ -384,7 +361,7 @@ async def main():
     init_db()
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Initialize the application (key fix)
+    # Initialize the application
     await application.initialize()
 
     # Attach bot to Flask app

@@ -33,15 +33,15 @@ nest_asyncio.apply()
 
 # Bot configuration
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
-NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"  # Verify this key is correct
-WEBHOOK_URL = "https://casino-bot-41de.onrender.com"  # Ensure this matches your deployment
+NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"
+WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 
 # Database functions
 def init_db():
     with sqlite3.connect('users.db') as conn:
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS users 
-                     (user_id INTEGER PRIMARY KEY, username TEXT, balance REAL DEFAULT 0.0)''')
+                     (user_id INTEGER PRIMARY KEY, username TEXT, balance REAL)''')
         c.execute('''CREATE TABLE IF NOT EXISTS pending_deposits 
                      (payment_id TEXT PRIMARY KEY, user_id INTEGER, currency TEXT)''')
         conn.commit()
@@ -68,7 +68,7 @@ def update_user_balance(user_id, new_balance):
 def add_pending_deposit(payment_id, user_id, currency):
     with sqlite3.connect('users.db') as conn:
         c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO pending_deposits (payment_id, user_id, currency) VALUES (?, ?, ?)",
+        c.execute("INSERT INTO pending_deposits (payment_id, user_id, currency) VALUES (?, ?, ?)",
                   (payment_id, user_id, currency))
         conn.commit()
 
@@ -96,12 +96,20 @@ def create_deposit_payment(user_id, currency='ltc'):
             "ipn_callback_url": f"{WEBHOOK_URL}/webhook",
             "order_id": f"deposit_{user_id}_{int(time.time())}",
         }
+        logger.info(f"Sending deposit request: {payload}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         if 'pay_address' not in data or 'payment_id' not in data:
+            logger.error(f"Invalid response from NOWPayments: {data}")
             raise ValueError("Invalid response from NOWPayments")
+        logger.info(f"Received deposit response: {data}")
         return data
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request failed: {e}")
+        if e.response is not None:
+            logger.error(f"Response content: {e.response.text}")
+        raise
     except Exception as e:
         logger.error(f"Deposit creation failed: {e}")
         raise
@@ -120,9 +128,17 @@ def create_payout(user_id, amount_usd, address):
             "order_id": f"withdrawal_{user_id}_{int(time.time())}",
             "address": address
         }
+        logger.info(f"Sending payout request: {payload}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        logger.info(f"Received payout response: {data}")
+        return data
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Payout API request failed: {e}")
+        if e.response is not None:
+            logger.error(f"Response content: {e.response.text}")
+        return None
     except Exception as e:
         logger.error(f"Payout creation failed: {e}")
         return None
@@ -160,38 +176,42 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
     text = (
         "📣 How To Start?\n"
-        "1. Make sure you have a balance. Use /balance to deposit.\n"
-        "2. Join a group in @BalticGames directory.\n"
-        "3. Try /dice to start playing!\n\n"
-        "📣 Available Games:\n"
+        "1. Make sure you have a balance. You can deposit by entering the /balance command.\n"
+        "2. Go to one of our groups in @BalticGames directory\n"
+        "3. Enter the /dice command and you are ready!\n\n"
+        "📣 What games can I play?\n"
         "• 🎲 Dice - /dice\n"
         "• 🎳 Bowling - /bowl\n"
         "• 🎯 Darts - /dart\n"
         "• ⚽️ Football - /football\n"
         "• 🏀 Basketball - /basketball\n"
         "• 🪙 Coinflip - /coin\n"
-        "• 🎰 Slots - /slots\n"
-        "• 🎲 Predict - /predict\n"
+        "• 🎰 Slot machine - /slots\n"
+        "• 🎲 Dice Prediction - /predict\n"
         "• 💣 Mines - /mine\n"
-        "• 🐒 Tower - /tower\n"
-        "• 🎰 Roulette - /roul\n\n"
-        "Have fun! 🍀"
+        "• 🐒 Monkey Tower - /tower\n"
+        "• 🎰 Roulette  - /roul\n\n"
+        "Enjoy the games! 🍀"
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
 
 async def balance_command(update, context):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+
     if not user_exists(user_id):
-        await context.bot.send_message(chat_id=chat_id, text="Please register with /start.")
+        await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
         return
+
     balance = get_user_balance(user_id)
     text = f"Your balance: ${balance:.2f}"
+
     keyboard = [
         [InlineKeyboardButton("Deposit", callback_data="deposit"),
          InlineKeyboardButton("Withdraw", callback_data="withdraw")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
 async def button_handler(update, context):
@@ -212,23 +232,30 @@ async def button_handler(update, context):
                 expires_in = format_expiration_time(expiration_time) if expiration_time else "1:00:00"
                 add_pending_deposit(payment_id, user_id, 'ltc')
                 text = (
-                    "💳 Litecoin Deposit\n\n"
-                    f"LTC address: `{address}`\n"
-                    f"Expires in: {expires_in}\n"
-                    "Send any amount of LTC to this address."
+                    "💳 Litecoin deposit\n\n"
+                    "To top up your balance, transfer the desired amount to this LTC address.\n\n"
+                    "Please note:\n"
+                    "1. The deposit address is temporary and is only issued for 1 hour. A new one will be created after that.\n"
+                    "2. One address accepts only one payment.\n\n"
+                    f"LTC address: {address}\n"
+                    f"Expires in: {expires_in}"
                 )
-                await context.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
+                await context.bot.send_message(chat_id=chat_id, text=text)
             except Exception as e:
-                logger.error(f"Deposit error: {e}")
-                await context.bot.send_message(chat_id=chat_id, text="Failed to generate deposit address. Try again or contact support.")
+                error_msg = str(e)
+                if "401" in error_msg:
+                    await context.bot.send_message(chat_id=chat_id, text="API key is invalid. Please contact support.")
+                elif "400" in error_msg:
+                    await context.bot.send_message(chat_id=chat_id, text="Invalid request. Please try again later.")
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text=f"Failed to generate deposit address: {error_msg}. Try again or contact support.")
         await query.answer()
     elif data == "withdraw":
         if update.effective_chat.type != 'private':
             await context.bot.send_message(chat_id=chat_id, text="Please start a private conversation with me to proceed with the withdrawal.")
         else:
-            balance = get_user_balance(user_id)
-            await context.bot.send_message(chat_id=chat_id, text=f"Your balance: ${balance:.2f}\nPlease enter amount and LTC address (e.g., '5.00 LTC123...')")
             context.user_data['expecting_withdrawal_details'] = True
+            await context.bot.send_message(chat_id=chat_id, text="Please enter the amount in USD and your LTC address, e.g., '5.00 LTC123...'")
         await query.answer()
     else:
         await query.answer("Unknown action.")
@@ -281,7 +308,7 @@ def telegram_webhook():
 @app.route('/webhook', methods=['POST'])
 def nowpayments_webhook():
     data = request.json
-    logger.info(f"NOWPayments Webhook: {data}")
+    logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
         pay_amount = float(data.get('pay_amount', 0))
@@ -305,20 +332,7 @@ def nowpayments_webhook():
                             loop
                         )
                     except Exception as e:
-                        logger.error(f"Webhook processing error: {e}")
-    return Response(status=200)
-
-@app.route('/payout_webhook', methods=['POST'])
-def payout_webhook():
-    data = request.json
-    logger.info(f"Payout Webhook: {data}")
-    if data.get('payout_status') == 'finished':
-        order_id = data['order_id']
-        user_id = int(order_id.split('_')[1])
-        asyncio.run_coroutine_threadsafe(
-            app.bot.send_message(chat_id=user_id, text="✅ Your withdrawal has been confirmed!"),
-            loop
-        )
+                        logger.error(f"Failed to process deposit: {e}")
     return Response(status=200)
 
 def run_loop(loop):
@@ -337,28 +351,6 @@ async def main():
     application.add_handler(CommandHandler("balance", balance_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    application.add_handler(CommandHandler("basketball", basketball_command))
-    application.add_handler(CommandHandler("bowl", bowling_command))
-    application.add_handler(CommandHandler("coin", coin_command))
-    application.add_handler(CommandHandler("dart", dart_command))
-    application.add_handler(CommandHandler("dice", dice_command))
-    application.add_handler(CommandHandler("football", football_command))
-    application.add_handler(CommandHandler("mine", mine_command))
-    application.add_handler(CommandHandler("predict", predict_command))
-    application.add_handler(CommandHandler("roul", roulette_command))
-    application.add_handler(CommandHandler("slots", slots_command))
-    application.add_handler(CommandHandler("tower", tower_command))
-    application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))
-    application.add_handler(CallbackQueryHandler(bowling_button_handler, pattern="^bowl_"))
-    application.add_handler(CallbackQueryHandler(coin_button_handler, pattern="^coin_"))
-    application.add_handler(CallbackQueryHandler(dart_button_handler, pattern="^(dart_|accept_|cancel_)"))
-    application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
-    application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^football_"))
-    application.add_handler(CallbackQueryHandler(mine_button_handler, pattern="^mine_"))
-    application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
-    application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
-    application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
-    application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
     application.add_handler(MessageHandler(filters.ALL, fallback_handler))
 
     loop = asyncio.new_event_loop()

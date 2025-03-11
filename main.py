@@ -291,9 +291,9 @@ def is_valid_ltc_address(address):
     return re.match(pattern, address) is not None
 
 def initiate_payout(currency, amount, address):
-    """Initiate a payout via NOWPayments API with detailed error logging."""
+    """Initiate a payout via NOWPayments API using Authorization header with Bearer token."""
     url = "https://api.nowpayments.io/v1/payout"
-    headers = {"x-api-key": NOWPAYMENTS_API_KEY}
+    headers = {"Authorization": f"Bearer {NOWPAYMENTS_API_KEY}"}  # Use API key as Bearer token
     payload = {
         "currency": currency,
         "amount": float(amount),  # Ensure amount is a float
@@ -301,7 +301,7 @@ def initiate_payout(currency, amount, address):
         "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"
     }
     try:
-        logger.info(f"Initiating payout: {payload}")
+        logger.info("Sending payout request with Authorization header")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()

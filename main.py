@@ -35,7 +35,7 @@ nest_asyncio.apply()
 
 # Bot configuration
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
-NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"
+NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"  # Replace with a valid key if needed
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 BOT_USERNAME = "YourBotUsername"  # Replace with your bot's actual username
 OWNER_ID = 7054186974  # Replace with the owner's Telegram user ID
@@ -191,7 +191,6 @@ def create_game_handler(game_name, game_func):
             await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
             return
         if not context.args:
-            # No bet amount provided
             text = (
                 f"💣 Play {game_name.capitalize()}\n\n"
                 f"To play, type the command /{game_name} with the desired bet.\n\n"
@@ -202,7 +201,6 @@ def create_game_handler(game_name, game_func):
             )
             await context.bot.send_message(chat_id=chat_id, text=text)
             return
-        # Bet amount provided
         bet = context.args[0].lower()
         balance = get_user_balance(user_id)
         if bet == "all":
@@ -221,7 +219,6 @@ def create_game_handler(game_name, game_func):
         if bet_amount > balance:
             await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
             return
-        # Set bet amount in context and call the game function
         context.user_data['bet_amount'] = bet_amount
         await game_func(update, context)
     return handler
@@ -256,7 +253,6 @@ async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if amount > balance:
         await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
         return
-    # Perform the tip
     recipient_balance = get_user_balance(recipient_id)
     update_user_balance(user_id, balance - amount)
     update_user_balance(recipient_id, recipient_balance + amount)
@@ -264,7 +260,6 @@ async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Add balance command handler (owner only)
 async def add_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Allows the bot owner to add balance to a user's account."""
     if update.effective_user.id != OWNER_ID:
         await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to use this command.")
         return
@@ -296,21 +291,26 @@ def is_valid_ltc_address(address):
     return re.match(pattern, address) is not None
 
 def initiate_payout(currency, amount, address):
-    """Initiate a payout via NOWPayments API."""
+    """Initiate a payout via NOWPayments API with detailed error logging."""
     url = "https://api.nowpayments.io/v1/payout"
     headers = {"x-api-key": NOWPAYMENTS_API_KEY}
     payload = {
         "currency": currency,
-        "amount": amount,
+        "amount": float(amount),  # Ensure amount is a float
         "address": address,
         "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"
     }
     try:
+        logger.info(f"Initiating payout: {payload}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        logger.info(f"Payout successful: {data}")
+        return data
     except requests.exceptions.RequestException as e:
         logger.error(f"Payout request failed: {e}")
+        if e.response is not None:
+            logger.error(f"Response content: {e.response.text}")
         return {"status": "error", "message": str(e)}
 
 # Command handlers
@@ -414,7 +414,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Unknown action.")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Handle withdrawal details and dice username input
     if update.effective_chat.type == 'private' and context.user_data.get('expecting_withdrawal_details'):
         try:
             parts = update.message.text.strip().split()
@@ -437,7 +436,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ltc_amount = float(amount_usd / Decimal(str(ltc_price_usd)))
             payout_response = initiate_payout(currency, ltc_amount, address)
             if payout_response.get('status') == 'error':
-                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Withdrawal failed: {payout_response.get('message', 'Unknown error')}")
+                error_msg = payout_response.get('message', 'Unknown error')
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Withdrawal failed: {error_msg}. Please check your API key or contact support.")
             else:
                 new_balance = balance - amount_usd
                 update_user_balance(update.effective_user.id, new_balance)
@@ -447,9 +447,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=update.effective_chat.id, text=str(ve))
         except Exception as e:
             logger.error(f"Withdrawal error: {e}")
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="An error occurred. Please try again later.")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="An error occurred. Please try again later or contact support.")
     else:
-        # Handle dice game text input
         await dice_text_handler(update, context)
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

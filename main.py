@@ -41,6 +41,9 @@ BOT_USERNAME = "YourBotUsername"  # Replace with your bot's actual username
 price_cache = {}
 CACHE_EXPIRATION_MINUTES = 5
 
+# Fee adjustment percentage to cover NOWPayments fees (e.g., 1.5%)
+FEE_ADJUSTMENT = 0.015
+
 # Database functions
 def init_db():
     with sqlite3.connect('users.db') as conn:
@@ -319,24 +322,28 @@ def nowpayments_webhook():
     logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
-        pay_amount = float(data.get('pay_amount', 0))
+        # Use 'actually_paid' if available, else fall back to 'pay_amount'
+        amount_paid = float(data.get('actually_paid', data.get('pay_amount', 0)))
         currency = data.get('pay_currency')
-        if pay_amount > 0:
+        if amount_paid > 0:
             deposit = get_pending_deposit(payment_id)
             if deposit:
                 user_id, _ = deposit
                 try:
+                    # Apply fee adjustment (e.g., 1.5%)
+                    adjusted_amount = amount_paid * (1 - FEE_ADJUSTMENT)
                     crypto_price_usd = get_currency_to_usd_price(currency)
-                    usd_amount = round(pay_amount * crypto_price_usd, 2)
+                    usd_amount = round(adjusted_amount * crypto_price_usd, 2)
                     current_balance = get_user_balance(user_id)
                     new_balance = round(current_balance + usd_amount, 2)
                     update_user_balance(user_id, new_balance)
                     remove_pending_deposit(payment_id)
-                    logger.info(f"Processing deposit: {pay_amount} {currency} = ${usd_amount}")
+                    logger.info(f"Processing deposit: {amount_paid} {currency} (adjusted to {adjusted_amount}) = ${usd_amount}")
                     asyncio.run_coroutine_threadsafe(
                         app.bot.send_message(
                             chat_id=user_id,
-                            text=f"✅ Deposit of {pay_amount} {currency.upper()} (${usd_amount:.2f}) confirmed! New balance: ${new_balance:.2f}"
+                            text=f"✅ Deposit of {amount_paid} {currency.upper()} received! "
+                                 f"Credited ${usd_amount:.2f} after fees. New balance: ${new_balance:.2f}"
                         ),
                         loop
                     )

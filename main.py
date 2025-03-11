@@ -95,10 +95,14 @@ def get_user_by_username(username):
 # Helper functions
 def create_deposit_payment(user_id, currency='ltc'):
     try:
+        min_deposit_usd = 1.0
+        currency_price = get_currency_to_usd_price(currency)
+        min_deposit_currency = min_deposit_usd / currency_price
+        
         url = "https://api.nowpayments.io/v1/payment"
         headers = {"x-api-key": NOWPAYMENTS_API_KEY}
         payload = {
-            "price_amount": 0.0,  # Set to 0 to allow any amount
+            "price_amount": min_deposit_currency,
             "price_currency": currency,
             "pay_currency": currency,
             "ipn_callback_url": f"{WEBHOOK_URL}/webhook",
@@ -111,8 +115,13 @@ def create_deposit_payment(user_id, currency='ltc'):
         if 'pay_address' not in data or 'payment_id' not in data:
             logger.error(f"Invalid response from NOWPayments: {data}")
             raise ValueError("Invalid response from NOWPayments")
-        logger.info(f"Received deposit response: {data}")
+        logger.info(f"Deposit address generated: {data['pay_address']}, payment_id: {data['payment_id']}")
         return data
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request failed: {e}")
+        if e.response is not None:
+            logger.error(f"Response content: {e.response.text}")
+        raise
     except Exception as e:
         logger.error(f"Deposit creation failed: {e}")
         raise
@@ -131,7 +140,9 @@ def get_currency_to_usd_price(currency):
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        return data[currency_map[currency]]['usd']
+        price = data[currency_map[currency]]['usd']
+        logger.info(f"Fetched price for {currency}: ${price}")
+        return price
     except Exception as e:
         logger.error(f"Failed to fetch {currency} price: {e}")
         return 1.0  # Fallback price
@@ -146,6 +157,108 @@ def format_expiration_time(expiration_date_str):
         return f"{hours:01d}:{minutes:02d}:{seconds:02d}"
     except:
         return "1:00:00"
+
+# New functions for feature implementation
+async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE, game_name: str):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    args = context.args
+
+    if not user_exists(user_id):
+        await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
+        return None
+
+    if not args:
+        text = (
+            f"💣 Play {game_name.capitalize()}\n\n"
+            f"To play, type the command /{game_name} with the desired bet.\n\n"
+            f"Examples:\n"
+            f"/{game_name} 5.50 - to play for $5.50\n"
+            f"/{game_name} half - to play for half of your balance\n"
+            f"/{game_name} all - to play all-in"
+        )
+        await context.bot.send_message(chat_id=chat_id, text=text)
+        return None
+
+    bet = args[0].lower()
+    balance = get_user_balance(user_id)
+
+    if bet == "all":
+        bet_amount = balance
+    elif bet == "half":
+        bet_amount = balance / 2
+    else:
+        try:
+            bet_amount = float(bet)
+        except ValueError:
+            await context.bot.send_message(chat_id=chat_id, text="Invalid bet amount. Please use a number, 'half', or 'all'.")
+            return None
+
+    if bet_amount <= 0:
+        await context.bot.send_message(chat_id=chat_id, text="Bet amount must be greater than 0.")
+        return None
+
+    if round(bet_amount, 2) > round(balance, 2):
+        logger.info(f"Insufficient balance: bet={bet_amount}, balance={balance}")
+        await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
+        return None
+
+    return bet_amount
+
+def create_game_wrapper(game_name, game_func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        bet_amount = await process_bet(update, context, game_name)
+        if bet_amount is not None:
+            context.user_data['bet_amount'] = bet_amount
+            await game_func(update, context)
+    return wrapper
+
+async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    args = context.args
+
+    if not user_exists(user_id):
+        await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
+        return
+
+    if len(args) < 2:
+        await context.bot.send_message(chat_id=chat_id, text="Usage: /tip <amount> @username")
+        return
+
+    try:
+        amount = float(args[0])
+    except ValueError:
+        await context.bot.send_message(chat_id=chat_id, text="Invalid amount. Please use a number.")
+        return
+
+    if amount <= 0:
+        await context.bot.send_message(chat_id=chat_id, text="Tip amount must be greater than 0.")
+        return
+
+    username = args[1].lstrip('@')
+    recipient_id = get_user_by_username(username)
+
+    if not recipient_id:
+        await context.bot.send_message(chat_id=chat_id, text=f"User @{username} not found.")
+        return
+
+    if user_id == recipient_id:
+        await context.bot.send_message(chat_id=chat_id, text="You cannot tip yourself.")
+        return
+
+    balance = get_user_balance(user_id)
+    if amount > balance:
+        await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
+        return
+
+    recipient_balance = get_user_balance(recipient_id)
+    update_user_balance(user_id, balance - amount)
+    update_user_balance(recipient_id, recipient_balance + amount)
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"Successfully tipped ${amount:.2f} to @{username}."
+    )
 
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,7 +299,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     balance = get_user_balance(user_id)
-    text = f"Your balance: ${balance:.2f}"
+    text = f"Your balance: ${round(balance, 2):.2f}"
 
     keyboard = [
         [InlineKeyboardButton("Deposit", callback_data="deposit"),
@@ -201,6 +314,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     chat_id = query.message.chat_id
     user_id = query.from_user.id
+
+    await query.answer()  # Acknowledge the button press
 
     if data == "deposit":
         if update.effective_chat.type != 'private':
@@ -250,7 +365,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['expecting_withdrawal_details'] = True
             await context.bot.send_message(chat_id=chat_id, text="Please enter the amount in USD and your withdrawal address, e.g., '5.00 LTC123...'")
     else:
-        await query.answer("Unknown action.")
+        logger.info(f"Unknown callback data: {data}")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -293,9 +408,10 @@ def nowpayments_webhook():
                 user_id, _ = deposit
                 try:
                     crypto_price_usd = get_currency_to_usd_price(currency)
-                    usd_amount = pay_amount * crypto_price_usd
+                    usd_amount = round(pay_amount * crypto_price_usd, 2)
+                    logger.info(f"Processing deposit: {pay_amount} {currency} = ${usd_amount}")
                     current_balance = get_user_balance(user_id)
-                    new_balance = current_balance + usd_amount
+                    new_balance = round(current_balance + usd_amount, 2)
                     update_user_balance(user_id, new_balance)
                     remove_pending_deposit(payment_id)
                     asyncio.run_coroutine_threadsafe(
@@ -327,17 +443,20 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
     # Register game command handlers with bet logic
-    application.add_handler(CommandHandler("dice", dice_command))
-    application.add_handler(CommandHandler("tower", tower_command))
-    application.add_handler(CommandHandler("basketball", basketball_command))
-    application.add_handler(CommandHandler("bowl", bowling_command))
-    application.add_handler(CommandHandler("coin", coin_command))
-    application.add_handler(CommandHandler("dart", dart_command))
-    application.add_handler(CommandHandler("football", football_command))
-    application.add_handler(CommandHandler("mine", mine_command))
-    application.add_handler(CommandHandler("predict", predict_command))
-    application.add_handler(CommandHandler("roul", roulette_command))
-    application.add_handler(CommandHandler("slots", slots_command))
+    application.add_handler(CommandHandler("dice", create_game_wrapper("dice", dice_command)))
+    application.add_handler(CommandHandler("tower", create_game_wrapper("tower", tower_command)))
+    application.add_handler(CommandHandler("basketball", create_game_wrapper("basketball", basketball_command)))
+    application.add_handler(CommandHandler("bowl", create_game_wrapper("bowl", bowling_command)))
+    application.add_handler(CommandHandler("coin", create_game_wrapper("coin", coin_command)))
+    application.add_handler(CommandHandler("dart", create_game_wrapper("dart", dart_command)))
+    application.add_handler(CommandHandler("football", create_game_wrapper("football", football_command)))
+    application.add_handler(CommandHandler("mine", create_game_wrapper("mine", mine_command)))
+    application.add_handler(CommandHandler("predict", create_game_wrapper("predict", predict_command)))
+    application.add_handler(CommandHandler("roul", create_game_wrapper("roul", roulette_command)))
+    application.add_handler(CommandHandler("slots", create_game_wrapper("slots", slots_command)))
+
+    # Register tip command
+    application.add_handler(CommandHandler("tip", tip_command))
 
     # Register game button handlers
     application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))

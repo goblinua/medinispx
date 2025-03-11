@@ -38,6 +38,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6ref
 NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 BOT_USERNAME = "YourBotUsername"  # Replace with your bot's actual username
+OWNER_ID = 7054186974  # Replace with the owner's Telegram user ID
 
 # Price cache (currency -> (price, timestamp))
 price_cache = {}
@@ -97,7 +98,7 @@ def remove_pending_deposit(payment_id):
 def get_user_by_username(username):
     with sqlite3.connect('users.db') as conn:
         c = conn.cursor()
-        c.execute("SELECT user_id FROM users WHERE username = ?", (username,))
+        c.execute("SELECT user_id FROM users WHERE LOWER(username) = LOWER(?)", (username,))
         result = c.fetchone()
         return result[0] if result else None
 
@@ -261,6 +262,33 @@ async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_user_balance(recipient_id, recipient_balance + amount)
     await context.bot.send_message(chat_id=chat_id, text=f"Successfully tipped ${amount:.2f} to @{username}.")
 
+# Add balance command handler (owner only)
+async def add_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allows the bot owner to add balance to a user's account."""
+    if update.effective_user.id != OWNER_ID:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to use this command.")
+        return
+    if len(context.args) != 2:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Usage: /addbalance <username> <amount>")
+        return
+    username = context.args[0].lstrip('@')
+    try:
+        amount = Decimal(context.args[1])
+    except ValueError:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid amount. Please use a number.")
+        return
+    if amount <= 0:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Amount must be greater than 0.")
+        return
+    target_user_id = get_user_by_username(username)
+    if not target_user_id:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"User @{username} not found.")
+        return
+    current_balance = get_user_balance(target_user_id)
+    new_balance = current_balance + amount
+    update_user_balance(target_user_id, new_balance)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Added ${amount:.2f} to @{username}'s balance. New balance: ${new_balance:.2f}")
+
 # Withdrawal Helper Functions
 def is_valid_ltc_address(address):
     """Validate Litecoin address format."""
@@ -386,9 +414,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Unknown action.")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    if context.user_data.get('expecting_withdrawal_details'):
+    # Only process text messages in private chats when expecting withdrawal details
+    if update.effective_chat.type == 'private' and context.user_data.get('expecting_withdrawal_details'):
         try:
             parts = update.message.text.strip().split()
             if len(parts) < 2:
@@ -397,32 +424,31 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             address = parts[1]
             currency = 'ltc'
             if not is_valid_ltc_address(address):
-                await context.bot.send_message(chat_id=chat_id, text="Invalid LTC address. Please check and try again.")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid LTC address. Please check and try again.")
                 return
-            balance = get_user_balance(user_id)
+            balance = get_user_balance(update.effective_user.id)
             if amount_usd > balance:
-                await context.bot.send_message(chat_id=chat_id, text="Insufficient balance for withdrawal.")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="Insufficient balance for withdrawal.")
                 return
             ltc_price_usd = get_currency_to_usd_price(currency)
             if ltc_price_usd == 0:
-                await context.bot.send_message(chat_id=chat_id, text="Failed to fetch LTC price. Try again later.")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="Failed to fetch LTC price. Try again later.")
                 return
             ltc_amount = float(amount_usd / Decimal(str(ltc_price_usd)))
             payout_response = initiate_payout(currency, ltc_amount, address)
             if payout_response.get('status') == 'error':
-                await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal failed: {payout_response.get('message', 'Unknown error')}")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Withdrawal failed: {payout_response.get('message', 'Unknown error')}")
             else:
                 new_balance = balance - amount_usd
-                update_user_balance(user_id, new_balance)
-                await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal of ${amount_usd:.2f} to {address} successful! New balance: ${new_balance:.2f}")
+                update_user_balance(update.effective_user.id, new_balance)
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Withdrawal of ${amount_usd:.2f} to {address} successful! New balance: ${new_balance:.2f}")
             context.user_data['expecting_withdrawal_details'] = False
         except ValueError as ve:
-            await context.bot.send_message(chat_id=chat_id, text=str(ve))
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=str(ve))
         except Exception as e:
             logger.error(f"Withdrawal error: {e}")
-            await context.bot.send_message(chat_id=chat_id, text="An error occurred. Please try again later.")
-    else:
-        await context.bot.send_message(chat_id=chat_id, text="I don’t understand that command.")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="An error occurred. Please try again later.")
+    # Do nothing for other text messages
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Unhandled update: {update}")
@@ -501,6 +527,9 @@ async def main():
 
     # Register tip command
     application.add_handler(CommandHandler("tip", tip_command))
+
+    # Register addbalance command (owner only)
+    application.add_handler(CommandHandler("addbalance", add_balance_command))
 
     # Register game button handlers
     application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))

@@ -6,8 +6,9 @@ import os
 import logging
 import threading
 import time
-import re  # Added for LTC address validation
+import re  # For LTC address validation
 from datetime import datetime, timedelta
+from decimal import Decimal  # For precise monetary calculations
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from flask import Flask, request, Response
@@ -66,12 +67,12 @@ def get_user_balance(user_id):
         c = conn.cursor()
         c.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
         result = c.fetchone()
-        return result[0] if result else 0.0
+        return Decimal(str(result[0])) if result else Decimal('0.0')
 
 def update_user_balance(user_id, new_balance):
     with sqlite3.connect('users.db') as conn:
         c = conn.cursor()
-        c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, user_id))
+        c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (float(new_balance), user_id))
         conn.commit()
 
 def add_pending_deposit(payment_id, user_id, currency):
@@ -136,7 +137,6 @@ def create_deposit_payment(user_id, currency='ltc'):
 
 def get_currency_to_usd_price(currency):
     try:
-        # Check cache first
         if currency in price_cache:
             price, timestamp = price_cache[currency]
             if datetime.now() - timestamp < timedelta(minutes=CACHE_EXPIRATION_MINUTES):
@@ -158,18 +158,15 @@ def get_currency_to_usd_price(currency):
         response.raise_for_status()
         data = response.json()
         price = data[currency_map[currency]]['usd']
-        # Update cache
         price_cache[currency] = (price, datetime.now())
         logger.info(f"Fetched new price for {currency}: ${price}")
         return price
     except Exception as e:
         logger.error(f"Failed to fetch {currency} price: {e}")
-        # Use last cached price if available
         if currency in price_cache:
             price, _ = price_cache[currency]
             logger.info(f"Using last cached price for {currency}: ${price}")
             return price
-        # Fallback to 1.0 if no cache
         logger.info(f"No cached price for {currency}, using fallback price: $1.0")
         return 1.0
 
@@ -184,6 +181,86 @@ def format_expiration_time(expiration_date_str):
     except:
         return "1:00:00"
 
+# Generic game command handler
+def create_game_handler(game_name, game_func):
+    async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        if not user_exists(user_id):
+            await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
+            return
+        if not context.args:
+            # No bet amount provided
+            text = (
+                f"💣 Play {game_name.capitalize()}\n\n"
+                f"To play, type the command /{game_name} with the desired bet.\n\n"
+                f"Examples:\n"
+                f"/{game_name} 5.50 - to play for $5.50\n"
+                f"/{game_name} half - to play for half of your balance\n"
+                f"/{game_name} all - to play all-in"
+            )
+            await context.bot.send_message(chat_id=chat_id, text=text)
+            return
+        # Bet amount provided
+        bet = context.args[0].lower()
+        balance = get_user_balance(user_id)
+        if bet == "all":
+            bet_amount = balance
+        elif bet == "half":
+            bet_amount = balance / 2
+        else:
+            try:
+                bet_amount = Decimal(bet)
+            except ValueError:
+                await context.bot.send_message(chat_id=chat_id, text="Invalid bet amount. Please use a number, 'half', or 'all'.")
+                return
+        if bet_amount <= 0:
+            await context.bot.send_message(chat_id=chat_id, text="Bet amount must be greater than 0.")
+            return
+        if bet_amount > balance:
+            await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
+            return
+        # Set bet amount in context and call the game function
+        context.user_data['bet_amount'] = bet_amount
+        await game_func(update, context)
+    return handler
+
+# Tip command handler
+async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if not user_exists(user_id):
+        await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
+        return
+    if len(context.args) != 2:
+        await context.bot.send_message(chat_id=chat_id, text="Usage: /tip <amount> @username")
+        return
+    try:
+        amount = Decimal(context.args[0])
+    except ValueError:
+        await context.bot.send_message(chat_id=chat_id, text="Invalid amount. Please use a number.")
+        return
+    if amount <= 0:
+        await context.bot.send_message(chat_id=chat_id, text="Tip amount must be greater than 0.")
+        return
+    username = context.args[1].lstrip('@')
+    recipient_id = get_user_by_username(username)
+    if not recipient_id:
+        await context.bot.send_message(chat_id=chat_id, text=f"User @{username} not found.")
+        return
+    if user_id == recipient_id:
+        await context.bot.send_message(chat_id=chat_id, text="You cannot tip yourself.")
+        return
+    balance = get_user_balance(user_id)
+    if amount > balance:
+        await context.bot.send_message(chat_id=chat_id, text="Insufficient balance.")
+        return
+    # Perform the tip
+    recipient_balance = get_user_balance(recipient_id)
+    update_user_balance(user_id, balance - amount)
+    update_user_balance(recipient_id, recipient_balance + amount)
+    await context.bot.send_message(chat_id=chat_id, text=f"Successfully tipped ${amount:.2f} to @{username}.")
+
 # Withdrawal Helper Functions
 def is_valid_ltc_address(address):
     """Validate Litecoin address format."""
@@ -195,10 +272,10 @@ def initiate_payout(currency, amount, address):
     url = "https://api.nowpayments.io/v1/payout"
     headers = {"x-api-key": NOWPAYMENTS_API_KEY}
     payload = {
-        "currency": currency,  # e.g., 'ltc'
-        "amount": amount,      # Amount in the specified currency (e.g., LTC)
-        "address": address,    # User's withdrawal address
-        "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"  # Optional, for payout status updates
+        "currency": currency,
+        "amount": amount,
+        "address": address,
+        "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"
     }
     try:
         response = requests.post(url, json=payload, headers=headers)
@@ -241,20 +318,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-
     if not user_exists(user_id):
         await context.bot.send_message(chat_id=chat_id, text="Please register with /start first.")
         return
-
     balance = get_user_balance(user_id)
-    text = f"Your balance: ${round(balance, 2):.2f}"
-
+    text = f"Your balance: ${balance:.2f}"
     keyboard = [
         [InlineKeyboardButton("Deposit", callback_data="deposit"),
          InlineKeyboardButton("Withdraw", callback_data="withdraw")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,7 +335,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     chat_id = query.message.chat_id
     user_id = query.from_user.id
-
     if data == "deposit":
         if update.effective_chat.type != 'private':
             await context.bot.send_message(chat_id=chat_id, text=f"Please start a private conversation with me to proceed with the deposit: t.me/{BOT_USERNAME}")
@@ -318,46 +390,31 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if context.user_data.get('expecting_withdrawal_details'):
         try:
-            # Parse user input
             parts = update.message.text.strip().split()
             if len(parts) < 2:
                 raise ValueError("Please enter 'amount address', e.g., '9.87 LTC123...'")
-            amount_usd = float(parts[0])  # e.g., 9.87
-            address = parts[1]  # e.g., ltc1qulcymywm4rx7m03z6qwthjk8y5suscsjpz4z9u
-            
-            # Only Litecoin supported for now
+            amount_usd = Decimal(parts[0])
+            address = parts[1]
             currency = 'ltc'
-            
-            # Validate the LTC address
             if not is_valid_ltc_address(address):
                 await context.bot.send_message(chat_id=chat_id, text="Invalid LTC address. Please check and try again.")
                 return
-            
-            # Check balance
             balance = get_user_balance(user_id)
             if amount_usd > balance:
                 await context.bot.send_message(chat_id=chat_id, text="Insufficient balance for withdrawal.")
                 return
-            
-            # Get LTC price
             ltc_price_usd = get_currency_to_usd_price(currency)
             if ltc_price_usd == 0:
                 await context.bot.send_message(chat_id=chat_id, text="Failed to fetch LTC price. Try again later.")
                 return
-            
-            # Convert USD to LTC
-            ltc_amount = amount_usd / ltc_price_usd  # e.g., if LTC is $50, then 9.87 / 50 = 0.1974 LTC
-            
-            # Send the withdrawal
+            ltc_amount = float(amount_usd / Decimal(str(ltc_price_usd)))
             payout_response = initiate_payout(currency, ltc_amount, address)
             if payout_response.get('status') == 'error':
                 await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal failed: {payout_response.get('message', 'Unknown error')}")
             else:
-                # Update balance
                 new_balance = balance - amount_usd
                 update_user_balance(user_id, new_balance)
                 await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal of ${amount_usd:.2f} to {address} successful! New balance: ${new_balance:.2f}")
-            
             context.user_data['expecting_withdrawal_details'] = False
         except ValueError as ve:
             await context.bot.send_message(chat_id=chat_id, text=str(ve))
@@ -385,7 +442,6 @@ def nowpayments_webhook():
     logger.info(f"NOWPayments Webhook received: {data}")
     if data.get('payment_status') == 'finished':
         payment_id = data['payment_id']
-        # Use 'actually_paid' if available, else fall back to 'pay_amount'
         amount_paid = float(data.get('actually_paid', data.get('pay_amount', 0)))
         currency = data.get('pay_currency')
         if amount_paid > 0:
@@ -393,12 +449,11 @@ def nowpayments_webhook():
             if deposit:
                 user_id, _ = deposit
                 try:
-                    # Apply fee adjustment (e.g., 1.5%)
                     adjusted_amount = amount_paid * (1 - FEE_ADJUSTMENT)
                     crypto_price_usd = get_currency_to_usd_price(currency)
-                    usd_amount = round(adjusted_amount * crypto_price_usd, 2)
+                    usd_amount = Decimal(str(adjusted_amount * crypto_price_usd)).quantize(Decimal('0.01'))
                     current_balance = get_user_balance(user_id)
-                    new_balance = round(current_balance + usd_amount, 2)
+                    new_balance = current_balance + usd_amount
                     update_user_balance(user_id, new_balance)
                     remove_pending_deposit(payment_id)
                     logger.info(f"Processing deposit: {amount_paid} {currency} (adjusted to {adjusted_amount}) = ${usd_amount}")
@@ -432,19 +487,22 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
     # Register game command handlers with bet logic
-    application.add_handler(CommandHandler("dice", dice_command))
-    application.add_handler(CommandHandler("tower", tower_command))
-    application.add_handler(CommandHandler("basketball", basketball_command))
-    application.add_handler(CommandHandler("bowl", bowling_command))
-    application.add_handler(CommandHandler("coin", coin_command))
-    application.add_handler(CommandHandler("dart", dart_command))
-    application.add_handler(CommandHandler("football", football_command))
-    application.add_handler(CommandHandler("mine", mine_command))
-    application.add_handler(CommandHandler("predict", predict_command))
-    application.add_handler(CommandHandler("roul", roulette_command))
-    application.add_handler(CommandHandler("slots", slots_command))
+    application.add_handler(CommandHandler("dice", create_game_handler("dice", dice_command)))
+    application.add_handler(CommandHandler("tower", create_game_handler("tower", tower_command)))
+    application.add_handler(CommandHandler("basketball", create_game_handler("basketball", basketball_command)))
+    application.add_handler(CommandHandler("bowl", create_game_handler("bowl", bowling_command)))
+    application.add_handler(CommandHandler("coin", create_game_handler("coin", coin_command)))
+    application.add_handler(CommandHandler("dart", create_game_handler("dart", dart_command)))
+    application.add_handler(CommandHandler("football", create_game_handler("football", football_command)))
+    application.add_handler(CommandHandler("mine", create_game_handler("mine", mine_command)))
+    application.add_handler(CommandHandler("predict", create_game_handler("predict", predict_command)))
+    application.add_handler(CommandHandler("roul", create_game_handler("roul", roulette_command)))
+    application.add_handler(CommandHandler("slots", create_game_handler("slots", slots_command)))
 
-    # Register game button handlers (if applicable)
+    # Register tip command
+    application.add_handler(CommandHandler("tip", tip_command))
+
+    # Register game button handlers
     application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
     application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
     application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))

@@ -6,6 +6,7 @@ import os
 import logging
 import threading
 import time
+import re  # Added for LTC address validation
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -183,6 +184,30 @@ def format_expiration_time(expiration_date_str):
     except:
         return "1:00:00"
 
+# Withdrawal Helper Functions
+def is_valid_ltc_address(address):
+    """Validate Litecoin address format."""
+    pattern = r'^(L|M|ltc1)[a-zA-Z0-9]{25,40}$'
+    return re.match(pattern, address) is not None
+
+def initiate_payout(currency, amount, address):
+    """Initiate a payout via NOWPayments API."""
+    url = "https://api.nowpayments.io/v1/payout"
+    headers = {"x-api-key": NOWPAYMENTS_API_KEY}
+    payload = {
+        "currency": currency,  # e.g., 'ltc'
+        "amount": amount,      # Amount in the specified currency (e.g., LTC)
+        "address": address,    # User's withdrawal address
+        "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"  # Optional, for payout status updates
+    }
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Payout request failed: {e}")
+        return {"status": "error", "message": str(e)}
+
 # Command handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -284,7 +309,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text=f"Please start a private conversation with me to proceed with the withdrawal: t.me/{BOT_USERNAME}")
         else:
             context.user_data['expecting_withdrawal_details'] = True
-            await context.bot.send_message(chat_id=chat_id, text="Please enter the amount in USD and your withdrawal address, e.g., '5.00 LTC123...'")
+            await context.bot.send_message(chat_id=chat_id, text="Please enter the amount in USD and your LTC address, e.g., '9.87 LTC123...' (Note: Only Litecoin withdrawals are supported.)")
     else:
         await query.answer("Unknown action.")
 
@@ -293,14 +318,52 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if context.user_data.get('expecting_withdrawal_details'):
         try:
+            # Parse user input
             parts = update.message.text.strip().split()
-            amount_usd = float(parts[0])
-            address = " ".join(parts[1:])
-            # Placeholder for actual withdrawal logic
-            await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal of ${amount_usd:.2f} to {address} is coming soon!")
+            if len(parts) < 2:
+                raise ValueError("Please enter 'amount address', e.g., '9.87 LTC123...'")
+            amount_usd = float(parts[0])  # e.g., 9.87
+            address = parts[1]  # e.g., ltc1qulcymywm4rx7m03z6qwthjk8y5suscsjpz4z9u
+            
+            # Only Litecoin supported for now
+            currency = 'ltc'
+            
+            # Validate the LTC address
+            if not is_valid_ltc_address(address):
+                await context.bot.send_message(chat_id=chat_id, text="Invalid LTC address. Please check and try again.")
+                return
+            
+            # Check balance
+            balance = get_user_balance(user_id)
+            if amount_usd > balance:
+                await context.bot.send_message(chat_id=chat_id, text="Insufficient balance for withdrawal.")
+                return
+            
+            # Get LTC price
+            ltc_price_usd = get_currency_to_usd_price(currency)
+            if ltc_price_usd == 0:
+                await context.bot.send_message(chat_id=chat_id, text="Failed to fetch LTC price. Try again later.")
+                return
+            
+            # Convert USD to LTC
+            ltc_amount = amount_usd / ltc_price_usd  # e.g., if LTC is $50, then 9.87 / 50 = 0.1974 LTC
+            
+            # Send the withdrawal
+            payout_response = initiate_payout(currency, ltc_amount, address)
+            if payout_response.get('status') == 'error':
+                await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal failed: {payout_response.get('message', 'Unknown error')}")
+            else:
+                # Update balance
+                new_balance = balance - amount_usd
+                update_user_balance(user_id, new_balance)
+                await context.bot.send_message(chat_id=chat_id, text=f"Withdrawal of ${amount_usd:.2f} to {address} successful! New balance: ${new_balance:.2f}")
+            
             context.user_data['expecting_withdrawal_details'] = False
-        except ValueError:
-            await context.bot.send_message(chat_id=chat_id, text="Invalid input. Please enter 'amount address', e.g., '5.00 LTC123...'")
+        except ValueError as ve:
+            await context.bot.send_message(chat_id=chat_id, text=str(ve))
+        except Exception as e:
+            logger.error(f"Withdrawal error: {e}")
+            await context.bot.send_message(chat_id=chat_id, text="An error occurred. Please try again later.")
     else:
         await context.bot.send_message(chat_id=chat_id, text="I don’t understand that command.")
 

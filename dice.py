@@ -113,12 +113,12 @@ async def dice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_with_retry(context.bot, chat_id, text="Please register with /start.")
         return
 
-    if len(args) != 1:
-        await send_with_retry(context.bot, chat_id, text="Usage: /dice <amount>\nExample: /dice 1")
+    if 'bet_amount' not in context.user_data:
+        await send_with_retry(context.bot, chat_id, text="Please use /dice <amount> to set a bet.")
         return
 
     try:
-        amount = float(args[0])
+        amount = float(context.user_data['bet_amount'])
         if amount <= 0:
             raise ValueError("Bet must be positive.")
         balance = get_user_balance(user_id)

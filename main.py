@@ -290,18 +290,46 @@ def is_valid_ltc_address(address):
     pattern = r'^(L|M|ltc1)[a-zA-Z0-9]{25,40}$'
     return re.match(pattern, address) is not None
 
-def initiate_payout(currency, amount, address):
-    """Initiate a payout via NOWPayments API using Authorization header with Bearer token."""
-    url = "https://api.nowpayments.io/v1/payout"
-    headers = {"Authorization": f"Bearer {NOWPAYMENTS_API_KEY}"}  # Use API key as Bearer token
-    payload = {
-        "currency": currency,
-        "amount": float(amount),  # Ensure amount is a float
-        "address": address,
-        "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"
-    }
+def get_jwt_token():
+    """Fetch a JWT token from NOWPayments API using the API key."""
+    url = "https://api.nowpayments.io/v1/auth"
+    headers = {"x-api-key": NOWPAYMENTS_API_KEY}
     try:
-        logger.info("Sending payout request with Authorization header")
+        response = requests.post(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        if "token" in data:
+            logger.info("Successfully obtained JWT token")
+            return data["token"]
+        else:
+            raise Exception("No token found in response")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to get JWT token: {e}")
+        if e.response is not None:
+            logger.error(f"Response content: {e.response.text}")
+        raise
+
+def initiate_payout(currency, amount, address):
+    """Initiate a payout via NOWPayments API with proper authentication and payload."""
+    url = "https://api.nowpayments.io/v1/payout"
+    try:
+        token = get_jwt_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "x-api-key": NOWPAYMENTS_API_KEY,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "withdrawals": [
+                {
+                    "address": address,
+                    "currency": currency,
+                    "amount": float(amount),
+                    "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"
+                }
+            ]
+        }
+        logger.info(f"Sending payout request with payload: {payload}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()

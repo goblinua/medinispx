@@ -14,7 +14,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from flask import Flask, request, Response
 
 # Game imports (replace with your actual game modules)
-from dice import dice_command, dice_button_handler
+from dice import dice_command, dice_button_handler, dice_text_handler
 from tower import tower_command, tower_button_handler
 from basketball import basketball_command, basketball_button_handler
 from bowling import bowling_command, bowling_button_handler
@@ -414,7 +414,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Unknown action.")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Only process text messages in private chats when expecting withdrawal details
+    # Handle withdrawal details and dice username input
     if update.effective_chat.type == 'private' and context.user_data.get('expecting_withdrawal_details'):
         try:
             parts = update.message.text.strip().split()
@@ -448,7 +448,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Withdrawal error: {e}")
             await context.bot.send_message(chat_id=update.effective_chat.id, text="An error occurred. Please try again later.")
-    # Do nothing for other text messages
+    else:
+        # Handle dice game text input
+        await dice_text_handler(update, context)
 
 async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Unhandled update: {update}")
@@ -509,8 +511,6 @@ async def main():
     # Register handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("balance", balance_command))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
     # Register game command handlers with bet logic
     application.add_handler(CommandHandler("dice", create_game_handler("dice", dice_command)))
@@ -531,7 +531,7 @@ async def main():
     # Register addbalance command (owner only)
     application.add_handler(CommandHandler("addbalance", add_balance_command))
 
-    # Register game button handlers
+    # Register game button handlers FIRST
     application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))
     application.add_handler(CallbackQueryHandler(tower_button_handler, pattern="^tower_"))
     application.add_handler(CallbackQueryHandler(basketball_button_handler, pattern="^basketball_"))
@@ -543,6 +543,12 @@ async def main():
     application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
     application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
     application.add_handler(CallbackQueryHandler(slots_button_handler, pattern="^slots_"))
+
+    # Then, register the general button handler
+    application.add_handler(CallbackQueryHandler(button_handler))
+
+    # Register text handler for withdrawal and dice username input
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     # Fallback handler
     application.add_handler(MessageHandler(filters.ALL, fallback_handler))

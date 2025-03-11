@@ -42,7 +42,7 @@ OWNER_ID = 7054186974  # Replace with the owner's Telegram user ID
 
 # Price cache (currency -> (price, timestamp))
 price_cache = {}
-CACHE_EXPIRATION_MINUTES = 5
+CACHE_EXPIRATION_MINUTES = 10  # Increased to reduce API calls
 
 # Fee adjustment percentage to cover NOWPayments fees (e.g., 1.5%)
 FEE_ADJUSTMENT = 0.015
@@ -137,6 +137,7 @@ def create_deposit_payment(user_id, currency='ltc'):
         raise
 
 def get_currency_to_usd_price(currency):
+    """Fetch the USD price of a cryptocurrency with rate limit handling."""
     try:
         if currency in price_cache:
             price, timestamp = price_cache[currency]
@@ -156,6 +157,10 @@ def get_currency_to_usd_price(currency):
         }
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={currency_map[currency]}&vs_currencies=usd"
         response = requests.get(url)
+        if response.status_code == 429:
+            logger.warning("Rate limit exceeded, waiting 60 seconds before retrying")
+            time.sleep(60)
+            response = requests.get(url)
         response.raise_for_status()
         data = response.json()
         price = data[currency_map[currency]]['usd']
@@ -291,10 +296,13 @@ def is_valid_ltc_address(address):
     return re.match(pattern, address) is not None
 
 def get_jwt_token():
-    """Fetch a JWT token from NOWPayments API using the API key and email."""
+    """Fetch a JWT token from NOWPayments API using the API key, email, and password."""
     url = "https://api.nowpayments.io/v1/auth"
     headers = {"x-api-key": NOWPAYMENTS_API_KEY}
-    payload = {"email": "goblinasgoblinas777@gmail.com"}  # Added your email here
+    payload = {
+        "email": "goblinasgoblinas777@gmail.com",  # Your email
+        "password": os.environ.get("NOWPAYMENTS_PASSWORD")  # Password from environment variable
+    }
     try:
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()

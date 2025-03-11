@@ -291,11 +291,12 @@ def is_valid_ltc_address(address):
     return re.match(pattern, address) is not None
 
 def get_jwt_token():
-    """Fetch a JWT token from NOWPayments API using the API key."""
+    """Fetch a JWT token from NOWPayments API using the API key and email."""
     url = "https://api.nowpayments.io/v1/auth"
     headers = {"x-api-key": NOWPAYMENTS_API_KEY}
+    payload = {"email": "goblinasgoblinas777@gmail.com"}  # Added your email here
     try:
-        response = requests.post(url, headers=headers)
+        response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         if "token" in data:

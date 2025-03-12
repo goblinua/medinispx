@@ -300,8 +300,8 @@ def get_jwt_token():
     url = "https://api.nowpayments.io/v1/auth"
     headers = {"x-api-key": NOWPAYMENTS_API_KEY}
     payload = {
-        "email": "goblinasgoblinas777@gmail.com",  # Your email
-        "password": os.environ.get("NOWPAYMENTS_PASSWORD")  # Password from environment variable
+        "email": "goblinasgoblinas777@gmail.com",
+        "password": "baltasbaltas22"  # Hardcoded for testing; replace with os.environ.get("NOWPAYMENTS_PASSWORD") later
     }
     try:
         response = requests.post(url, json=payload, headers=headers)

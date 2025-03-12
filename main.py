@@ -295,26 +295,51 @@ def is_valid_ltc_address(address):
     pattern = r'^(L|M|ltc1)[a-zA-Z0-9]{25,40}$'
     return re.match(pattern, address) is not None
 
+def get_jwt_token():
+    """Fetch a fresh JWT token from NOWPayments API."""
+    url = "https://api.nowpayments.io/v1/login"  # Confirm this endpoint with NOWPayments support
+    payload = {
+        "email": "your-email@example.com",  # Replace with your NOWPayments email
+        "password": "your-password"         # Replace with your NOWPayments password
+    }
+    headers = {"Content-Type": "application/json"}
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        if "token" in data:
+            logger.info("JWT token obtained successfully")
+            return data["token"]
+        else:
+            logger.error("No token found in response")
+            raise Exception("No token in response")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to get JWT token: {e}")
+        if e.response is not None:
+            logger.error(f"Response content: {e.response.text}")
+        raise
+
 def initiate_payout(currency, amount, address):
     """Initiate a payout via NOWPayments API with proper authentication and payload."""
     url = "https://api.nowpayments.io/v1/payout"
-    headers = {
-        "x-api-key": NOWPAYMENTS_API_KEY,
-        "Authorization": f"Bearer {NOWPAYMENTS_API_KEY}",  # Added Bearer token for authentication
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "withdrawals": [
-            {
-                "address": address,
-                "currency": currency,
-                "amount": float(amount),
-                "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"
-            }
-        ]
-    }
     try:
-        logger.info(f"Sending payout request with headers: {{'x-api-key': '***', 'Authorization': 'Bearer ***', 'Content-Type': 'application/json'}} and payload: {payload}")
+        token = get_jwt_token()  # Fetch a fresh token
+        headers = {
+            "x-api-key": NOWPAYMENTS_API_KEY,
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "withdrawals": [
+                {
+                    "address": address,
+                    "currency": currency,
+                    "amount": float(amount),
+                    "ipn_callback_url": f"{WEBHOOK_URL}/payout_webhook"
+                }
+            ]
+        }
+        logger.info(f"Sending payout request with payload: {payload}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()

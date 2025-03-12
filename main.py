@@ -300,6 +300,7 @@ def initiate_payout(currency, amount, address):
     url = "https://api.nowpayments.io/v1/payout"
     headers = {
         "x-api-key": NOWPAYMENTS_API_KEY,
+        "Authorization": f"Bearer {NOWPAYMENTS_API_KEY}",  # Added Bearer token for authentication
         "Content-Type": "application/json"
     }
     payload = {
@@ -313,7 +314,7 @@ def initiate_payout(currency, amount, address):
         ]
     }
     try:
-        logger.info(f"Sending payout request with payload: {payload}")
+        logger.info(f"Sending payout request with headers: {{'x-api-key': '***', 'Authorization': 'Bearer ***', 'Content-Type': 'application/json'}} and payload: {payload}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()

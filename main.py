@@ -35,7 +35,7 @@ nest_asyncio.apply()
 
 # Bot configuration
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
-NOWPAYMENTS_API_KEY = "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA"  # Replace with a valid key if needed
+NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
 WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
 BOT_USERNAME = "YourBotUsername"  # Replace with your bot's actual username
 OWNER_ID = 7054186974  # Replace with the owner's Telegram user ID
@@ -297,10 +297,10 @@ def is_valid_ltc_address(address):
 
 def get_jwt_token():
     """Fetch a fresh JWT token from NOWPayments API."""
-    url = "https://api.nowpayments.io/v1/login"  # Confirm this endpoint with NOWPayments support
+    url = "https://api.nowpayments.io/v1/auth"
     payload = {
-        "email": "your-email@example.com",  # Replace with your NOWPayments email
-        "password": "your-password"         # Replace with your NOWPayments password
+        "email": "goblingoblinu@gmail.com",
+        "password": "Melynaslaiskas1"
     }
     headers = {"Content-Type": "application/json"}
     try:
@@ -311,7 +311,7 @@ def get_jwt_token():
             logger.info("JWT token obtained successfully")
             return data["token"]
         else:
-            logger.error("No token found in response")
+            logger.error(f"No token found in response: {data}")
             raise Exception("No token in response")
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to get JWT token: {e}")

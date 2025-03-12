@@ -479,7 +479,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 new_balance = balance - amount_usd
                 update_user_balance(update.effective_user.id, new_balance)
-                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Withdrawal of ${amount_usd:.2f} to {address} successful! New balance: ${new_balance:.2f}")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Your withdrawal of ${amount_usd:.2f} to {address} was successful! New balance: ${new_balance:.2f}")
             context.user_data['expecting_withdrawal_details'] = False
         except ValueError as ve:
             await context.bot.send_message(chat_id=update.effective_chat.id, text=str(ve))

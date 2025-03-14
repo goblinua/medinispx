@@ -289,6 +289,33 @@ async def add_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     update_user_balance(target_user_id, new_balance)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Added ${amount:.2f} to @{username}'s balance. New balance: ${new_balance:.2f}")
 
+# Remove balance command handler (owner only)
+async def remove_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to use this command.")
+        return
+    if len(context.args) != 2:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Usage: /removebalance <username> <amount>")
+        return
+    username = context.args[0].lstrip('@')
+    try:
+        amount = Decimal(context.args[1])
+    except ValueError:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid amount. Please use a number.")
+        return
+    if amount <= 0:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="Amount must be greater than 0.")
+        return
+    target_user_id = get_user_by_username(username)
+    if not target_user_id:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"User @{username} not found.")
+        return
+    current_balance = get_user_balance(target_user_id)
+    new_balance = current_balance - amount
+    update_user_balance(target_user_id, new_balance)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Removed ${amount:.2f} from @{username}'s balance. New balance: ${new_balance:.2f}")
+    logger.info(f"Admin removed ${amount:.2f} from @{username}'s balance. New balance: ${new_balance:.2f}")
+
 # Withdrawal Helper Functions
 def is_valid_ltc_address(address):
     """Validate Litecoin address format."""
@@ -565,8 +592,9 @@ async def main():
     # Register tip command
     application.add_handler(CommandHandler("tip", tip_command))
 
-    # Register addbalance command (owner only)
+    # Register addbalance and removebalance commands (owner only)
     application.add_handler(CommandHandler("addbalance", add_balance_command))
+    application.add_handler(CommandHandler("removebalance", remove_balance_command))
 
     # Register game button handlers FIRST
     application.add_handler(CallbackQueryHandler(dice_button_handler, pattern="^dice_"))

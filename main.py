@@ -36,9 +36,9 @@ nest_asyncio.apply()
 # Bot configuration
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8118951743:AAHT6bOYhmzl98fyKXvkfvez6refrn5dOlU")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "86WDA8Y-A7V4Y5Y-N0ETC4V-JXB03GA")
-WEBHOOK_URL = "https://casino-bot-41de.onrender.com"
-BOT_USERNAME = "YourBotUsername"  # Replace with your bot's actual username
-OWNER_ID = 7054186974  # Replace with the owner's Telegram user ID
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://casino-bot-41de.onrender.com")
+BOT_USERNAME = os.environ.get("BOT_USERNAME", "YourBotUsername")
+OWNER_ID = int(os.environ.get("OWNER_ID", "7054186974"))
 
 # Price cache (currency -> (price, timestamp))
 price_cache = {}
@@ -118,14 +118,14 @@ def create_deposit_payment(user_id, currency='ltc'):
             "ipn_callback_url": f"{WEBHOOK_URL}/webhook",
             "order_id": f"deposit_{user_id}_{int(time.time())}",
         }
-        logger.info(f"Sending deposit request: {payload}")
+        logger.info(f"Sending deposit request for user_id: {user_id}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         if 'pay_address' not in data or 'payment_id' not in data:
             logger.error(f"Invalid response from NOWPayments: {data}")
             raise ValueError("Invalid response from NOWPayments")
-        logger.info(f"Received deposit response: {data}")
+        logger.info(f"Received deposit response for user_id: {user_id}")
         return data
     except requests.exceptions.RequestException as e:
         logger.error(f"API request failed: {e}")
@@ -326,8 +326,8 @@ def get_jwt_token():
     """Fetch a fresh JWT token from NOWPayments API."""
     url = "https://api.nowpayments.io/v1/auth"
     payload = {
-        "email": "goblingoblinu@gmail.com",
-        "password": "Melynaslaiskas1"
+        "email": os.environ.get("NOWPAYMENTS_EMAIL", "goblingoblinu@gmail.com"),
+        "password": os.environ.get("NOWPAYMENTS_PASSWORD", "Melynaslaiskas1")
     }
     headers = {"Content-Type": "application/json"}
     try:
@@ -366,7 +366,7 @@ def initiate_payout(currency, amount, address):
                 }
             ]
         }
-        logger.info(f"Sending payout request with payload: {payload}")
+        logger.info(f"Sending payout request for address: {address}")
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
@@ -603,7 +603,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(bowling_button_handler, pattern="^bowl_"))
     application.add_handler(CallbackQueryHandler(coin_button_handler, pattern="^coin_"))
     application.add_handler(CallbackQueryHandler(dart_button_handler, pattern="^dart_"))
-    application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^football_"))
+    application.add_handler(CallbackQueryHandler(football_button_handler, pattern="^tower_"))
     application.add_handler(CallbackQueryHandler(mine_button_handler, pattern="^mine_"))
     application.add_handler(CallbackQueryHandler(predict_button_handler, pattern="^predict_"))
     application.add_handler(CallbackQueryHandler(roulette_button_handler, pattern="^roul_"))
